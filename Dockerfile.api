@@ -22,11 +22,10 @@ RUN bun install
 # Генерируем клиент (он попадет в /app/shared/node_modules, т.к. схема в /app/shared/prisma)
 RUN bunx prisma@5.22.0 generate --schema=../../shared/prisma/schema.prisma
 
-# ВРУЧНУЮ копируем сгенерированный клиент из shared в api node_modules
-# Создаем папки на случай если их нет
+# ВРУЧНУЮ копируем сгенерированный клиент из shared (../node_modules) в api (./node_modules)
 RUN mkdir -p node_modules/.prisma && mkdir -p node_modules/@prisma
-RUN cp -r ../../node_modules/.prisma/* node_modules/.prisma/ && \
-    cp -r ../../node_modules/@prisma/client/* node_modules/@prisma/client/ || cp -r ../../node_modules/@prisma/client node_modules/@prisma/
+RUN cp -r ../node_modules/.prisma/* node_modules/.prisma/ && \
+    cp -r ../node_modules/@prisma/client/* node_modules/@prisma/client/ || cp -r ../node_modules/@prisma/client node_modules/@prisma/
 
 # Возвращаемся в папку API для запуска
 WORKDIR /app/shared/api
