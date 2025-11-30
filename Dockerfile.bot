@@ -1,6 +1,9 @@
 # Используем официальный образ Bun
 FROM oven/bun:1
 
+# Устанавливаем OpenSSL (нужен для Prisma)
+RUN apt-get update -y && apt-get install -y openssl
+
 WORKDIR /app
 
 # Копируем общие зависимости и код
@@ -19,7 +22,7 @@ COPY bot ./bot
 WORKDIR /app/bot
 RUN bun install
 
-# Генерируем клиент (попадет в /app/shared/node_modules, т.к. схема в /app/shared/prisma)
+# Генерируем клиент (попадет в /app/shared/node_modules)
 RUN bunx prisma@5.22.0 generate --schema=../shared/prisma/schema.prisma
 
 # ВРУЧНУЮ копируем сгенерированный клиент из shared (../shared/node_modules) в bot (./node_modules)
