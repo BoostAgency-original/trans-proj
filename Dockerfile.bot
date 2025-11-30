@@ -19,9 +19,9 @@ COPY bot ./bot
 WORKDIR /app/bot
 RUN bun install
 
-# ВАЖНО: Генерируем Prisma Client ПОСЛЕ установки всех зависимостей
-WORKDIR /app/shared
-RUN bunx prisma generate
+# ВАЖНО: Генерируем Prisma Client ПОСЛЕ установки зависимостей бота
+# Указываем путь к схеме
+RUN bunx prisma generate --schema=../shared/prisma/schema.prisma
 
 # Возвращаемся в папку бота для запуска
 WORKDIR /app/bot

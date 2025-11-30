@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json ./
 COPY shared ./shared
 
-# Устанавливаем зависимости для shared
+# Устанавливаем зависимости для shared (чтобы был prisma CLI)
 WORKDIR /app/shared
 RUN bun install
 
@@ -19,10 +19,9 @@ COPY shared/api ./shared/api
 WORKDIR /app/shared/api
 RUN bun install
 
-# ВАЖНО: Генерируем Prisma Client ПОСЛЕ установки всех зависимостей
-# Указываем путь к схеме явно, так как мы находимся в папке api, а схема в shared
-WORKDIR /app/shared
-RUN bunx prisma generate
+# ВАЖНО: Генерируем Prisma Client ПОСЛЕ установки зависимостей API
+# Указываем путь к схеме (она в /app/shared/prisma/schema.prisma)
+RUN bunx prisma generate --schema=../../shared/prisma/schema.prisma
 
 # Возвращаемся в папку API для запуска
 WORKDIR /app/shared/api
