@@ -1,0 +1,28 @@
+# Используем официальный образ Bun
+FROM oven/bun:1
+
+WORKDIR /app
+
+# Копируем общие зависимости
+COPY package.json bun.lockb ./
+COPY shared ./shared
+
+# Устанавливаем зависимости для shared и генерируем Prisma Client
+WORKDIR /app/shared
+RUN bun install
+RUN bunx prisma generate
+
+# Копируем исходный код API
+WORKDIR /app
+COPY shared/api ./shared/api
+
+# Устанавливаем зависимости API
+WORKDIR /app/shared/api
+RUN bun install
+
+# Возвращаемся в папку API для запуска
+WORKDIR /app/shared/api
+
+# Команда запуска
+CMD ["bun", "run", "src/index.ts"]
+

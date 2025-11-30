@@ -1,0 +1,33 @@
+# Dependencies
+node_modules
+.bun
+dist
+build
+coverage
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea
+.vscode
+*.swp
+*.swo
+
+# Prisma
+shared/prisma/dev.db
+shared/prisma/migrations/*_init

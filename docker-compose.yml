@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # База данных
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: transurfing_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # API Сервер
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    restart: always
+    environment:
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/transurfing_db
+      PORT: 3001
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    depends_on:
+      - db
+    ports:
+      - "3001:3001"
+
+  # Telegram Бот
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot
+    restart: always
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/transurfing_db
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      PAYMENT_PROVIDER_TOKEN: ${PAYMENT_PROVIDER_TOKEN}
+      TECH_SUPPORT_BOT: ${TECH_SUPPORT_BOT}
+      ADMIN_ID: ${ADMIN_ID}
+    depends_on:
+      - db
+      - api
+
+  # Админ панель (Frontend + Nginx)
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+

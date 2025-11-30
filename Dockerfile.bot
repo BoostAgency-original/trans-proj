@@ -1,0 +1,28 @@
+# Используем официальный образ Bun
+FROM oven/bun:1
+
+WORKDIR /app
+
+# Копируем общие зависимости
+COPY package.json bun.lockb ./
+COPY shared ./shared
+
+# Устанавливаем зависимости для shared и генерируем Prisma Client
+WORKDIR /app/shared
+RUN bun install
+RUN bunx prisma generate
+
+# Копируем исходный код бота
+WORKDIR /app
+COPY bot ./bot
+
+# Устанавливаем зависимости бота
+WORKDIR /app/bot
+RUN bun install
+
+# Возвращаемся в папку бота для запуска
+WORKDIR /app/bot
+
+# Команда запуска
+CMD ["bun", "run", "src/index.ts"]
+

@@ -1,0 +1,28 @@
+{
+  "name": "trans-proj",
+  "version": "1.0.0",
+  "description": "Telegram bot for Transurfing with admin panel",
+  "private": true,
+  "workspaces": [
+    "bot",
+    "admin",
+    "shared",
+    "shared/api"
+  ],
+  "scripts": {
+    "install:all": "bun install && cd bot && bun install && cd ../admin && bun install && cd ../shared && bun install && cd api && bun install",
+    "bot:dev": "bun --cwd bot run dev",
+    "bot:start": "bun --cwd bot run start",
+    "admin:dev": "bun --cwd admin run dev",
+    "admin:build": "bun --cwd admin run build",
+    "api:dev": "bun --cwd shared/api run dev",
+    "prisma:migrate": "bun --cwd shared run prisma:migrate",
+    "prisma:generate": "bun --cwd shared run prisma:generate",
+    "prisma:studio": "bun --cwd shared run prisma:studio"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  }
+}
+

@@ -1,0 +1,22 @@
+{
+  "name": "bot",
+  "version": "1.0.0",
+  "description": "Transurfing Telegram Bot",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.7.1",
+    "dotenv": "^16.3.1",
+    "grammy": "^1.19.2",
+    "openai": "^6.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "bun-types": "^1.0.18",
+    "typescript": "^5.3.3"
+  }
+}

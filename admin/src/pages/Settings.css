@@ -1,0 +1,82 @@
+.settings-page {
+  max-width: 1400px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.setting-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.setting-card:hover {
+  transform: translateY(-2px);
+}
+
+.setting-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.setting-key {
+  font-weight: 600;
+  color: #667eea;
+  font-size: 1.125rem;
+}
+
+.setting-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.setting-description {
+  color: #999;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.setting-value {
+  color: #333;
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border-radius: 8px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+.setting-form-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.setting-form {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  max-width: 600px;
+  width: 90%;
+}
+
+.setting-form h2 {
+  margin-bottom: 1.5rem;
+  color: #333;
+}
+

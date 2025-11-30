@@ -1,0 +1,25 @@
+# Этап сборки (Build stage)
+FROM oven/bun:1 as build
+
+WORKDIR /app
+
+# Копируем файлы админки
+COPY admin ./admin
+
+WORKDIR /app/admin
+RUN bun install
+RUN bun run build
+
+# Этап запуска (Production stage)
+FROM nginx:alpine
+
+# Копируем собранные файлы в папку Nginx
+COPY --from=build /app/admin/dist /usr/share/nginx/html
+
+# Копируем конфиг Nginx
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
+

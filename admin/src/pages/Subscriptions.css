@@ -1,0 +1,36 @@
+.subscriptions-page {
+  max-width: 1400px;
+}
+
+.subscriptions-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.subscriptions-table thead {
+  background: #f8f9fa;
+}
+
+.subscriptions-table th {
+  padding: 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 2px solid #e9ecef;
+}
+
+.subscriptions-table td {
+  padding: 1rem;
+  border-bottom: 1px solid #e9ecef;
+  color: #666;
+}
+
+.subscriptions-table tbody tr:hover {
+  background: #f8f9fa;
+}
+
+.subscriptions-table small {
+  color: #999;
+  font-size: 0.875rem;
+}
+

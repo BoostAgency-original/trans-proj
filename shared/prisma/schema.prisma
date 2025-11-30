@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 Int                 @id @default(autoincrement())
+  telegramId         BigInt              @unique
+  username           String?
+  firstName          String?
+  lastName           String?
+  name               String?             // Имя пользователя для настроек
+  gender             String?             // Пол: 'male' | 'female'
+  isIntroCompleted   Boolean             @default(false) // Флаг завершения вводного сценария
+  introCompletedAt   DateTime?           // Дата завершения интро (для отсчета дней)
+  password           String?             // Пароль для настроек
+  timezone           String              @default("UTC") // Временная зона для утренних/вечерних сценариев
+  nextMorningMessageAt DateTime?         // Время следующего утреннего напоминания (для "Напомнить позже")
+  skippedDays        Int                 @default(0) // Количество пропущенных дней (вечерняя рефлексия)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  
+  subscription       Subscription?
+  diaryEntries       DiaryEntry[]
+  introductionData   IntroductionData?
+  
+  @@map("users")
+}
+
+model Subscription {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isActive          Boolean  @default(false)
+  activatedAt       DateTime?
+  trialDaysUsed     Int      @default(0) // Для отслеживания 4-дневного триала
+  expiresAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("subscriptions")
+}
+
+model DiaryEntry {
+  id                Int      @id @default(autoincrement())
+  userId            Int
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dayNumber         Int      // Номер дня/принципа
+  type              String   @default("general") // 'morning', 'evening', 'general'
+  note              String   @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("diary_entries")
+  @@index([userId, dayNumber])
+}
+
+model TransurfingPrinciple {
+  id          Int      @id @default(autoincrement())
+  dayNumber   Int      @unique // Порядковый номер дня (1, 2, 3...)
+  title       String
+  declaration String   @db.Text // Текст декларации
+  description String   @db.Text // Пояснение
+  task        String   @db.Text // Задание "Сегодня наблюдай..."
+  imageUrl    String?  // Опционально картинка
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("principles")
+}
+
+model IntroductionData {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  data              Json     // Данные из вводного сценария
+  completed         Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("introduction_data")
+}
+
+model BotMessage {
+  id                Int      @id @default(autoincrement())
+  key               String   @unique // Ключ для идентификации сообщения (например, "welcome_message", "menu_settings")
+  text              String   @db.Text
+  category          String   @default("general") // Категория: general, menu, introduction, daily, subscription
+  description       String?  @db.Text // Описание для админки
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("bot_messages")
+}
+
+model Settings {
+  id                Int      @id @default(autoincrement())
+  key               String   @unique
+  value             String   @db.Text
+  description       String?  @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("settings")
+}
