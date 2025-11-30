@@ -3,14 +3,13 @@ FROM oven/bun:1
 
 WORKDIR /app
 
-# Копируем общие зависимости
+# Копируем общие зависимости и код
 COPY package.json ./
 COPY shared ./shared
 
-# Устанавливаем зависимости для shared и генерируем Prisma Client
+# Устанавливаем зависимости для shared
 WORKDIR /app/shared
 RUN bun install
-RUN bunx prisma generate
 
 # Копируем исходный код API
 WORKDIR /app
@@ -20,9 +19,13 @@ COPY shared/api ./shared/api
 WORKDIR /app/shared/api
 RUN bun install
 
+# ВАЖНО: Генерируем Prisma Client ПОСЛЕ установки всех зависимостей
+# Указываем путь к схеме явно, так как мы находимся в папке api, а схема в shared
+WORKDIR /app/shared
+RUN bunx prisma generate
+
 # Возвращаемся в папку API для запуска
 WORKDIR /app/shared/api
 
 # Команда запуска
 CMD ["bun", "run", "src/index.ts"]
-

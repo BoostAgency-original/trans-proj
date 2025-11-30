@@ -3,14 +3,13 @@ FROM oven/bun:1
 
 WORKDIR /app
 
-# Копируем общие зависимости
+# Копируем общие зависимости и код
 COPY package.json ./
 COPY shared ./shared
 
-# Устанавливаем зависимости для shared и генерируем Prisma Client
+# Устанавливаем зависимости для shared
 WORKDIR /app/shared
 RUN bun install
-RUN bunx prisma generate
 
 # Копируем исходный код бота
 WORKDIR /app
@@ -20,9 +19,12 @@ COPY bot ./bot
 WORKDIR /app/bot
 RUN bun install
 
+# ВАЖНО: Генерируем Prisma Client ПОСЛЕ установки всех зависимостей
+WORKDIR /app/shared
+RUN bunx prisma generate
+
 # Возвращаемся в папку бота для запуска
 WORKDIR /app/bot
 
 # Команда запуска
 CMD ["bun", "run", "src/index.ts"]
-
