@@ -1,19 +1,44 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getContinuePathKeyboard, getRemindLaterTrialKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 
 const prisma = new PrismaClient();
 
+// Данные о тарифах
+const PLANS = {
+    sub_plan_week: {
+        amount: 15900, // в копейках (159 руб)
+        title: 'Подписка на 1 неделю',
+        description: 'Доступ ко всем функциям бота на 7 дней',
+        duration: '1 неделю',
+        days: 7
+    },
+    sub_plan_month: {
+        amount: 39900, // 399 руб
+        title: 'Подписка на 1 месяц',
+        description: 'Доступ ко всем функциям бота на 30 дней',
+        duration: '1 месяц',
+        days: 30
+    },
+    sub_plan_80days: {
+        amount: 99900, // 999 руб
+        title: 'Подписка на 80 дней',
+        description: 'Полный курс Трансерфинга (80 дней)',
+        duration: '80 дней',
+        days: 80
+    }
+} as const;
+
+type PlanId = keyof typeof PLANS;
+
 export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
   
   // Кнопка "Продолжить путь" (из сообщения о конце триала) или "Подписка" из меню
-  // Используем callbackQuery, так как в меню теперь callback кнопки
   bot.callbackQuery(['menu_subscription', 'sub_activate'], async (ctx) => {
       const text = 'Выберите подходящий тариф:';
       
-      // Показываем тарифы
       try {
           await ctx.editMessageText(text, { reply_markup: getSubscriptionKeyboard() });
       } catch (e) {
@@ -22,37 +47,34 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       await ctx.answerCallbackQuery();
   });
 
-  // Обработка тарифов (интеграция Tribute)
+  // Шаг 1: Выбор тарифа → показываем подтверждение
   bot.callbackQuery(['sub_plan_week', 'sub_plan_month', 'sub_plan_80days'], async (ctx) => {
-      const plan = ctx.callbackQuery.data;
-      let amount = 0;
-      let title = '';
-      let description = '';
+      const planId = ctx.callbackQuery.data as PlanId;
+      const plan = PLANS[planId];
 
-      // Цены в копейках (если Tribute требует) или рублях. Tribute обычно принимает amount в минимальных единицах валюты (копейки для RUB).
-      // Уточним: Tribute API обычно работает с инвойсами Telegram Payments.
-      // Bot API createInvoice принимает цены в копейках (RUB).
-      // 159 RUB = 15900
-      
-      switch (plan) {
-          case 'sub_plan_week': 
-            amount = 15900; 
-            title = 'Подписка на 1 неделю'; 
-            description = 'Доступ ко всем функциям бота на 7 дней';
-            break;
-          case 'sub_plan_month': 
-            amount = 39900; 
-            title = 'Подписка на 1 месяц'; 
-            description = 'Доступ ко всем функциям бота на 30 дней';
-            break;
-          case 'sub_plan_80days': 
-            amount = 99900; 
-            title = 'Подписка на 80 дней'; 
-            description = 'Полный курс Трансерфинга (80 дней)';
-            break;
+      const confirmText = 
+          `Вы собираетесь купить подписку на использование сервиса на ${plan.duration}\n\n` +
+          `Стоимость: ${plan.amount / 100} ₽`;
+
+      const keyboard = new InlineKeyboard()
+          .text('💳 Купить', `confirm_buy_${planId}`)
+          .row()
+          .text('« Назад', 'menu_subscription');
+
+      try {
+          await ctx.editMessageText(confirmText, { reply_markup: keyboard });
+      } catch (e) {
+          await ctx.reply(confirmText, { reply_markup: keyboard });
       }
+      await ctx.answerCallbackQuery();
+  });
 
-      const providerToken = process.env.PAYMENT_PROVIDER_TOKEN; // Токен от Tribute/Smart Glocal
+  // Шаг 2: Подтверждение покупки → отправляем инвойс ЮКассы
+  bot.callbackQuery(/^confirm_buy_(.+)$/, async (ctx) => {
+      const planId = ctx.match[1] as PlanId;
+      const plan = PLANS[planId];
+
+      const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
       
       if (!providerToken) {
           await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
@@ -62,35 +84,45 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
 
       await ctx.answerCallbackQuery();
       
-      console.log(`Sending invoice: ${title} for ${amount}`);
+      console.log(`Sending invoice: ${plan.title} for ${plan.amount} kopecks`);
 
-      // Используем raw API для точной передачи параметров (избегаем ошибок парсинга)
-      await bot.api.raw.sendInvoice({
-          chat_id: ctx.chat!.id,
-          title: title,
-          description: description,
-          payload: plan,
-          provider_token: providerToken,
-          currency: 'RUB',
-          prices: JSON.stringify([{ label: title, amount: amount }])
-      });
+      // Отправляем инвойс через Telegram Payments API (ЮКасса)
+      try {
+          await bot.api.sendInvoice(
+              ctx.chat!.id,
+              plan.title,
+              plan.description,
+              planId, // payload - для идентификации после оплаты
+              'RUB',
+              [{ label: plan.title, amount: plan.amount }],
+              {
+                  provider_token: providerToken
+              }
+          );
+      } catch (error) {
+          console.error('Error sending invoice:', error);
+          await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', {
+              reply_markup: getBackToMenuKeyboard()
+          });
+      }
   });
   
-  // Обработчик PreCheckoutQuery (обязательно для платежей)
+  // Обработчик PreCheckoutQuery (обязательно для Telegram Payments)
   bot.on('pre_checkout_query', async (ctx) => {
+      // Здесь можно добавить проверки (например, актуальность цены)
+      // Для простоты просто подтверждаем
       await ctx.answerPreCheckoutQuery(true);
   });
 
   // Обработчик успешного платежа
   bot.on('message:successful_payment', async (ctx) => {
       const payment = ctx.message.successful_payment;
-      const payload = payment.invoice_payload; // sub_plan_week, etc.
+      const planId = payment.invoice_payload as PlanId;
+      const plan = PLANS[planId];
       
-      let daysToAdd = 0;
-      switch (payload) {
-          case 'sub_plan_week': daysToAdd = 7; break;
-          case 'sub_plan_month': daysToAdd = 30; break;
-          case 'sub_plan_80days': daysToAdd = 80; break;
+      if (!plan) {
+          console.error('Unknown plan in payment:', planId);
+          return;
       }
 
       const user = ctx.dbUser!;
@@ -99,7 +131,7 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
           : new Date();
 
       const newExpiresAt = new Date(currentExpiresAt);
-      newExpiresAt.setDate(newExpiresAt.getDate() + daysToAdd);
+      newExpiresAt.setDate(newExpiresAt.getDate() + plan.days);
 
       await prisma.subscription.upsert({
           where: { userId: user.id },
@@ -113,7 +145,7 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
               isActive: true,
               activatedAt: new Date(),
               expiresAt: newExpiresAt,
-              trialDaysUsed: user.subscription?.trialDaysUsed || 0 // Сохраняем прогресс триала если был
+              trialDaysUsed: user.subscription?.trialDaysUsed || 0
           }
       });
 
@@ -125,16 +157,15 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       );
   });
 
-  // Обработка "Напомнить позже" (из триала)
+  // Обработка "Напомнить позже" (из триала) - напоминание через 2 дня
   bot.callbackQuery('trial_remind_later', async (ctx) => {
-      // Ставим напоминание (как и раньше)
-      const nextTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // +2 часа
+      const nextTime = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000); // +2 дня
       await prisma.user.update({
           where: { id: ctx.dbUser!.id },
-          data: { nextMorningMessageAt: nextTime }
+          data: { subscriptionReminderAt: nextTime }
       });
 
-      const text = await getMessage('trial_remind_later', 'Иногда решение приходит не сразу...');
+      const text = await getMessage('trial_remind_later', 'Иногда решение приходит не сразу. Напомню тебе через 2 дня.');
       
       try {
           await ctx.editMessageText(text, { reply_markup: getRemindLaterTrialKeyboard() });
@@ -149,12 +180,10 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       const text = await getMessage('trial_no_thanks', 'Я уважаю твой выбор...');
       
       try {
-          // Убираем клавиатуру или меняем текст
-          await ctx.editMessageText(text, { reply_markup: undefined }); // Без кнопок, просто текст
+          await ctx.editMessageText(text, { reply_markup: undefined });
       } catch (e) {
           await ctx.reply(text);
       }
       await ctx.answerCallbackQuery();
   });
 }
-

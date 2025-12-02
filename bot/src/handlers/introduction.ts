@@ -158,21 +158,22 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
     } catch (e) {}
 
-    // Отправляем первый принцип немедленно
+    // Отправляем первый принцип немедленно (без "Доброе утро")
     const principle = await prisma.transurfingPrinciple.findUnique({
       where: { dayNumber: 1 }
     });
 
     if (principle) {
         const name = ctx.dbUser?.name || ctx.dbUser?.firstName || 'друг';
-        const message = `Доброе утро, ${name}!\n\n` +
-          `День 1. Принцип: ${principle.title}\n\n` +
-          `Декларация:\n\n${principle.declaration}\n\n` +
-          `Пояснение:\n${principle.description}\n\n` +
-          `Сегодня наблюдай:\n\n${principle.task}`;
+        const message = `${name}, поздравляю! Ты начал свой путь.\n\n` +
+          `*День 1. Принцип: ${principle.title}*\n\n` +
+          `*Декларация:*\n\n>${principle.declaration.split('\n').join('\n>')}\n\n` +
+          `*Пояснение:*\n${principle.description}\n\n` +
+          `*Сегодня наблюдай:*\n\n${principle.task}`;
 
         await ctx.reply(message, {
-            reply_markup: getMorningKeyboard()
+            reply_markup: getMorningKeyboard(),
+            parse_mode: 'Markdown'
         });
     } else {
         // Fallback если принципа нет

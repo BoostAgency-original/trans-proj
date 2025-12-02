@@ -95,12 +95,23 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
 
       if (isRegularTime || isReminderTime) {
         // Вычисляем номер дня
+        // Первый принцип отправляется сразу после интро, поэтому утром следующего дня — день 2
         const daysSinceIntro = Math.floor(
           (now.getTime() - new Date(user.introCompletedAt).getTime()) / (1000 * 60 * 60 * 24)
         );
+        // daysSinceIntro = 0 (тот же день) -> не отправляем (уже получил 1-й принцип)
+        // daysSinceIntro = 1 (следующий день) -> dayNumber = 2
+        // daysSinceIntro = 2 -> dayNumber = 3 и т.д.
+        
+        if (daysSinceIntro === 0) {
+          // Интро пройдено сегодня, первый принцип уже отправлен
+          console.log(`User ${user.id}: Intro completed today, skipping morning message (already got day 1)`);
+          continue;
+        }
+        
         const dayNumber = daysSinceIntro + 1;
         
-        // console.log(`User ${user.id}: Day number calculated: ${dayNumber}`);
+        console.log(`User ${user.id}: Day number calculated: ${dayNumber} (days since intro: ${daysSinceIntro})`);
 
         // Получаем принцип
         const principle = await prisma.transurfingPrinciple.findUnique({
@@ -115,10 +126,10 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
         const name = user.name || user.firstName || 'друг';
         
         const message = `Доброе утро, ${name}!\n\n` +
-          `День ${dayNumber}. Принцип: ${principle.title}\n\n` +
-          `Декларация:\n\n${principle.declaration}\n\n` +
-          `Пояснение:\n${principle.description}\n\n` +
-          `Сегодня наблюдай:\n\n${principle.task}`;
+          `*День ${dayNumber}. Принцип: ${principle.title}*\n\n` +
+          `*Декларация:*\n\n>${principle.declaration.split('\n').join('\n>')}\n\n` +
+          `*Пояснение:*\n${principle.description}\n\n` +
+          `*Сегодня наблюдай:*\n\n${principle.task}`;
 
         // Проверка подписки
         const subscription = user.subscription;
@@ -154,7 +165,8 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
 
         try {
           await bot.api.sendMessage(user.telegramId.toString(), message, {
-            reply_markup: getMorningKeyboard()
+            reply_markup: getMorningKeyboard(),
+            parse_mode: 'Markdown'
           });
           console.log(`✅ Sent morning principle (Day ${dayNumber}) to user ${user.id}`);
           
@@ -231,6 +243,48 @@ async function sendEveningMessages(bot: Bot<BotContext>) {
   } catch (error) {
     console.error('Error in sendEveningMessages:', error);
   }
+}
+
+// Функция для отправки напоминаний о подписке (через 2 дня после "Напомнить позже")
+async function sendSubscriptionReminders(bot: Bot<BotContext>) {
+    try {
+        const now = new Date();
+        
+        // Ищем пользователей с установленным временем напоминания о подписке, которое уже наступило
+        const users = await prisma.user.findMany({
+            where: {
+                subscriptionReminderAt: {
+                    lte: now // Время напоминания <= текущее время
+                },
+                subscription: {
+                    isActive: false // Подписка неактивна (триал истёк)
+                }
+            },
+            include: { subscription: true }
+        });
+
+        for (const user of users) {
+            const message = await getBotMessage('subscription_reminder') || 
+                'Привет! Прошло 2 дня. Готов продолжить путь трансформации?\n\nВыбери подходящий тариф:';
+            
+            try {
+                await bot.api.sendMessage(user.telegramId.toString(), message, {
+                    reply_markup: getSubscriptionKeyboard()
+                });
+                console.log(`✅ Sent subscription reminder to user ${user.id}`);
+                
+                // Сбрасываем время напоминания
+                await prisma.user.update({
+                    where: { id: user.id },
+                    data: { subscriptionReminderAt: null }
+                });
+            } catch (e) {
+                console.error(`Failed to send subscription reminder to ${user.id}`, e);
+            }
+        }
+    } catch (e) {
+        console.error('Error in sendSubscriptionReminders:', e);
+    }
 }
 
 // Функция для проверки окончания триала
@@ -333,9 +387,14 @@ export async function startScheduler(bot: Bot<BotContext>) {
     
     // console.log(`⏰ Проверка времени: ${currentTime}`);
     
-    // Запускаем проверку триалов раз в час (или чаще, но не обязательно каждую минуту)
+    // Запускаем проверку триалов раз в час
     if (now.getMinutes() === 0) {
         await checkTrialExpiration(bot);
+    }
+    
+    // Проверяем напоминания о подписке каждые 10 минут
+    if (now.getMinutes() % 10 === 0) {
+        await sendSubscriptionReminders(bot);
     }
 
     await sendMorningMessages(bot);

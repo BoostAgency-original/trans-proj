@@ -19,7 +19,8 @@ model User {
   introCompletedAt   DateTime?           // Дата завершения интро (для отсчета дней)
   password           String?             // Пароль для настроек
   timezone           String              @default("UTC") // Временная зона для утренних/вечерних сценариев
-  nextMorningMessageAt DateTime?         // Время следующего утреннего напоминания (для "Напомнить позже")
+  nextMorningMessageAt DateTime?         // Время следующего утреннего напоминания (для "Напомнить позже" 2ч)
+  subscriptionReminderAt DateTime?       // Время напоминания о подписке (через 2 дня после "Напомнить позже")
   skippedDays        Int                 @default(0) // Количество пропущенных дней (вечерняя рефлексия)
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
@@ -27,6 +28,7 @@ model User {
   subscription       Subscription?
   diaryEntries       DiaryEntry[]
   introductionData   IntroductionData?
+  payments           Payment[]
   
   @@map("users")
 }
@@ -106,4 +108,20 @@ model Settings {
   updatedAt         DateTime @updatedAt
   
   @@map("settings")
+}
+
+model Payment {
+  id          Int      @id @default(autoincrement())
+  uuid        String   @unique // Tribute Order UUID
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amount      Int      // In minimum currency units (kopecks)
+  currency    String
+  status      String   // 'new', 'paid', 'canceled', 'failed'
+  orderId     String?  // Internal order ID if needed
+  planId      String   // 'sub_plan_week', 'sub_plan_month', etc.
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("payments")
 }
