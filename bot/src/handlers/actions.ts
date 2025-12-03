@@ -61,7 +61,7 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
   });
 
 
-  // 2. Напомнить позже (2 часа)
+  // 2. Напомнить позже (2 часа) - утреннее сообщение
   bot.callbackQuery('remind_later_2h', async (ctx) => {
     const nextTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // +2 часа
     
@@ -71,6 +71,21 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
     });
 
     await ctx.reply('⏰ Хорошо, я напомню вам об этом через 2 часа.');
+    await ctx.answerCallbackQuery();
+  });
+
+  // 2b. Напомнить позже (2 часа) - вечернее сообщение
+  bot.callbackQuery('remind_evening_2h', async (ctx) => {
+    // Для тестов: 1 минута, в продакшене: 2 * 60 * 60 * 1000
+    // const nextTime = new Date(Date.now() + 1 * 60 * 1000); // +1 минута (для тестов)
+    const nextTime = new Date(Date.now() + 2 * 60 * 60 * 1000); // +2 часа (продакшен)
+    
+    await prisma.user.update({
+        where: { id: ctx.dbUser!.id },
+        data: { nextEveningMessageAt: nextTime }
+    });
+
+    await ctx.reply('⏰ Хорошо, напомню через некоторое время.');
     await ctx.answerCallbackQuery();
   });
 
@@ -288,7 +303,12 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
             const keyboard = new InlineKeyboard()
                 .text('❌ Закончить обсуждение', 'stop_ai_chat');
 
-            await ctx.reply(reply, { reply_markup: keyboard });
+            // Пробуем отправить с Markdown, если ошибка — без форматирования
+            try {
+                await ctx.reply(reply, { reply_markup: keyboard, parse_mode: 'Markdown' });
+            } catch {
+                await ctx.reply(reply, { reply_markup: keyboard });
+            }
 
         } catch (error) {
             console.error('AI Error:', error);

@@ -8,6 +8,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '../.env') });
 
 import { Bot, session } from 'grammy';
 import { PrismaClient } from '@prisma/client';
+import { getMessage } from './services/messages';
 import { setupCommands } from './commands';
 import { setupMenuHandlers } from './handlers/menu';
 import { setupSettingsHandlers } from './handlers/settings';
@@ -69,6 +70,18 @@ setupMenuHandlers(bot);
 setupSettingsHandlers(bot);
 setupSubscriptionHandlers(bot);
 setupDiaryHandlers(bot);
+
+// Обработчик необработанных текстовых сообщений (когда бот не ожидает ввода)
+const DEFAULT_UNKNOWN_MESSAGE = `Я не совсем понял, что ты хочешь сделать.
+
+Чтобы обсудить событие или принцип — открой /menu и нажми «🧠 Обсудить».
+
+Если хочешь записать мысль — нажми «📔 Дневник наблюдений».`;
+
+bot.on('message:text', async (ctx) => {
+  const text = await getMessage('unknown_message', DEFAULT_UNKNOWN_MESSAGE);
+  await ctx.reply(text);
+});
 
 // Обработка ошибок
 bot.catch((err) => {

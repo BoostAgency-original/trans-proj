@@ -36,7 +36,7 @@ export function setupCommands(bot: Bot<BotContext>) {
                            ctx.message?.text === '🚀 Готов начать' ||
                            ctx.message?.text === 'Мужской' ||
                            ctx.message?.text === 'Женский' ||
-                           ctx.message?.text === 'Да, я готов' ||
+                           ctx.message?.text === 'Да, я готов(а)' ||
                            ctx.message?.text === 'Да' ||
                            ctx.message?.text === 'Да, готов начать';
 

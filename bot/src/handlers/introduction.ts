@@ -64,7 +64,7 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
       ctx.session.step = 'intro_step4';
       
       const keyboard = new InlineKeyboard()
-        .text('Да, я готов', 'intro_ready');
+        .text('Да, я готов(а)', 'intro_ready');
 
       const text = await getMessage('intro_step_4', DEFAULT_TEXTS.step4);
       await ctx.reply(text, { reply_markup: keyboard });
@@ -81,7 +81,7 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
   });
   */
 
-  // Шаг 4: "Да, я готов"
+  // Шаг 4: "Да, я готов(а)"
   bot.callbackQuery('intro_ready', async (ctx) => {
     if (ctx.session.step !== 'intro_step4') {
         await ctx.answerCallbackQuery('Этот шаг уже пройден');
@@ -133,7 +133,8 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
       where: { id: ctx.dbUser!.id },
       data: { 
         isIntroCompleted: true,
-        introCompletedAt: new Date() // Фиксируем время завершения интро
+        introCompletedAt: new Date(), // Фиксируем время завершения интро
+        currentPrincipleDay: 2 // Первый принцип отправляем сейчас, следующий будет 2-й
       }
     });
 
@@ -166,14 +167,14 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
     if (principle) {
         const name = ctx.dbUser?.name || ctx.dbUser?.firstName || 'друг';
         const message = `${name}, поздравляю! Ты начал свой путь.\n\n` +
-          `*День 1. Принцип: ${principle.title}*\n\n` +
-          `*Декларация:*\n\n>${principle.declaration.split('\n').join('\n>')}\n\n` +
-          `*Пояснение:*\n${principle.description}\n\n` +
-          `*Сегодня наблюдай:*\n\n${principle.task}`;
+          `<b>День 1. Принцип: ${principle.title}</b>\n\n` +
+          `<b>Декларация:</b>\n\n<blockquote>${principle.declaration}</blockquote>\n\n` +
+          `<b>Пояснение:</b>\n${principle.description}\n\n` +
+          `<b>Сегодня наблюдай:</b>\n\n${principle.task}`;
 
         await ctx.reply(message, {
             reply_markup: getMorningKeyboard(),
-            parse_mode: 'Markdown'
+            parse_mode: 'HTML'
         });
     } else {
         // Fallback если принципа нет

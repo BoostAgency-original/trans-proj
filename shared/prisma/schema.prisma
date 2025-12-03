@@ -20,8 +20,10 @@ model User {
   password           String?             // Пароль для настроек
   timezone           String              @default("UTC") // Временная зона для утренних/вечерних сценариев
   nextMorningMessageAt DateTime?         // Время следующего утреннего напоминания (для "Напомнить позже" 2ч)
+  nextEveningMessageAt DateTime?         // Время следующего вечернего напоминания (для "Напомнить позже" 2ч)
   subscriptionReminderAt DateTime?       // Время напоминания о подписке (через 2 дня после "Напомнить позже")
   skippedDays        Int                 @default(0) // Количество пропущенных дней (вечерняя рефлексия)
+  currentPrincipleDay Int                @default(1) // Номер следующего принципа для отправки
   createdAt          DateTime            @default(now())
   updatedAt          DateTime            @updatedAt
   

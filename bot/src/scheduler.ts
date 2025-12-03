@@ -94,49 +94,17 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
       }
 
       if (isRegularTime || isReminderTime) {
-        // Вычисляем номер дня
-        // Первый принцип отправляется сразу после интро, поэтому утром следующего дня — день 2
-        const daysSinceIntro = Math.floor(
-          (now.getTime() - new Date(user.introCompletedAt).getTime()) / (1000 * 60 * 60 * 24)
-        );
-        // daysSinceIntro = 0 (тот же день) -> не отправляем (уже получил 1-й принцип)
-        // daysSinceIntro = 1 (следующий день) -> dayNumber = 2
-        // daysSinceIntro = 2 -> dayNumber = 3 и т.д.
+        // Используем currentPrincipleDay — номер следующего принципа для отправки
+        let dayNumber = user.currentPrincipleDay;
         
-        if (daysSinceIntro === 0) {
-          // Интро пройдено сегодня, первый принцип уже отправлен
-          console.log(`User ${user.id}: Intro completed today, skipping morning message (already got day 1)`);
-          continue;
-        }
-        
-        const dayNumber = daysSinceIntro + 1;
-        
-        console.log(`User ${user.id}: Day number calculated: ${dayNumber} (days since intro: ${daysSinceIntro})`);
+        console.log(`User ${user.id}: Current principle day: ${dayNumber}`);
 
-        // Получаем принцип
-        const principle = await prisma.transurfingPrinciple.findUnique({
-          where: { dayNumber }
-        });
-
-        if (!principle) {
-          console.log(`⚠️ User ${user.id}: No principle found for day ${dayNumber}`);
-          continue;
-        }
-
-        const name = user.name || user.firstName || 'друг';
-        
-        const message = `Доброе утро, ${name}!\n\n` +
-          `*День ${dayNumber}. Принцип: ${principle.title}*\n\n` +
-          `*Декларация:*\n\n>${principle.declaration.split('\n').join('\n>')}\n\n` +
-          `*Пояснение:*\n${principle.description}\n\n` +
-          `*Сегодня наблюдай:*\n\n${principle.task}`;
-
-        // Проверка подписки
+        // Проверка подписки (триал = первые 5 принципов)
         const subscription = user.subscription;
-        const trialDaysUsed = subscription?.trialDaysUsed || 0;
         const isActive = subscription?.isActive || false;
         
-        if (dayNumber > 4 && !isActive) {
+        // Если следующий принцип > 5 и подписка неактивна — показываем сообщение о подписке
+        if (dayNumber > 5 && !isActive) {
             console.log(`User ${user.id}: Subscription required (Day ${dayNumber})`);
             const subMsg = await getBotMessage('subscription_inactive') || `Ты проснулся в сновидении. Это уже сила.
 
@@ -151,10 +119,9 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
 Осталось 73 шага.
 
 Открой практику полностью — и начни управлять реальностью осознанно.`;
-            const finalMsg = subMsg.replace('{trial_days}', trialDaysUsed.toString());
             
              try {
-              await bot.api.sendMessage(user.telegramId.toString(), finalMsg, {
+              await bot.api.sendMessage(user.telegramId.toString(), subMsg, {
                   reply_markup: getSubscriptionKeyboard()
               });
             } catch (e) {
@@ -163,20 +130,52 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
             continue;
         }
 
+        // Получаем принцип
+        let principle = await prisma.transurfingPrinciple.findUnique({
+          where: { dayNumber }
+        });
+
+        // Если принцип не найден (закончились) — начинаем сначала
+        if (!principle) {
+          console.log(`User ${user.id}: No principle for day ${dayNumber}, cycling back to day 1`);
+          dayNumber = 1;
+          principle = await prisma.transurfingPrinciple.findUnique({
+            where: { dayNumber: 1 }
+          });
+          
+          if (!principle) {
+            console.log(`⚠️ User ${user.id}: No principles in database at all!`);
+            continue;
+          }
+        }
+
+        const name = user.name || user.firstName || 'друг';
+        
+        const message = `Доброе утро, ${name}!\n\n` +
+          `<b>День ${dayNumber}. Принцип: ${principle.title}</b>\n\n` +
+          `<b>Декларация:</b>\n\n<blockquote>${principle.declaration}</blockquote>\n\n` +
+          `<b>Пояснение:</b>\n${principle.description}\n\n` +
+          `<b>Сегодня наблюдай:</b>\n\n${principle.task}`;
+
         try {
           await bot.api.sendMessage(user.telegramId.toString(), message, {
             reply_markup: getMorningKeyboard(),
-            parse_mode: 'Markdown'
+            parse_mode: 'HTML'
           });
           console.log(`✅ Sent morning principle (Day ${dayNumber}) to user ${user.id}`);
           
-          // Сбрасываем напоминание, если сработало
-          if (isReminderTime) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: { nextMorningMessageAt: null }
-            });
-          }
+          // Инкрементируем номер принципа для следующего раза
+          // Получаем общее количество принципов для зацикливания
+          const totalPrinciples = await prisma.transurfingPrinciple.count();
+          const nextDay = dayNumber >= totalPrinciples ? 1 : dayNumber + 1;
+          
+          await prisma.user.update({
+            where: { id: user.id },
+            data: { 
+              currentPrincipleDay: nextDay,
+              nextMorningMessageAt: isReminderTime ? null : user.nextMorningMessageAt
+            }
+          });
         } catch (error) {
           console.error(`❌ Failed to send morning message to user ${user.id}:`, error);
         }
@@ -193,6 +192,8 @@ async function sendEveningMessages(bot: Bot<BotContext>) {
     const eveningTime = await getSetting('evening_time');
     if (!eveningTime) return;
 
+    const now = new Date();
+
     const users = await prisma.user.findMany({
       include: {
         subscription: true,
@@ -203,23 +204,26 @@ async function sendEveningMessages(bot: Bot<BotContext>) {
       if (!user.isIntroCompleted) continue;
 
       const userTime = getCurrentTimeInTimezone(user.timezone);
+      const isRegularTime = userTime === eveningTime;
       
-      // Лог для отладки времени (показываем раз в минуту для каждого активного юзера)
-      console.log(`👤 User ${user.id} (${user.timezone}): Local ${userTime} | Target ${eveningTime}`);
+      // Проверка отложенного напоминания
+      let isReminderTime = false;
+      if (user.nextEveningMessageAt) {
+        const reminderTime = new Date(user.nextEveningMessageAt);
+        const diff = now.getTime() - reminderTime.getTime();
+        // Если время напоминания наступило (с допуском 2 минуты)
+        if (diff >= 0 && diff < 2 * 60 * 1000) {
+          isReminderTime = true;
+        }
+      }
 
-      if (userTime === eveningTime) {
-        // Получаем номер дня
-        const daysSinceIntro = user.introCompletedAt 
-            ? Math.floor((Date.now() - new Date(user.introCompletedAt).getTime()) / (1000 * 60 * 60 * 24)) + 1
-            : 0;
-
-        // Проверка подписки
+      if (isRegularTime || isReminderTime) {
+        // Проверка подписки (триал = первые 5 принципов)
         const subscription = user.subscription;
         const isActive = subscription?.isActive || false;
 
-        if (daysSinceIntro > 4 && !isActive) {
-           // Если подписка неактивна и триал закончился
-           // Вечером ничего не отправляем
+        // Если уже получил 5 принципов и подписка неактивна — вечером не отправляем
+        if (user.currentPrincipleDay > 5 && !isActive) {
            continue;
         }
         
@@ -234,7 +238,15 @@ async function sendEveningMessages(bot: Bot<BotContext>) {
           await bot.api.sendMessage(user.telegramId.toString(), messageText, {
               reply_markup: getEveningKeyboard()
           });
-          console.log(`✅ Sent evening message to user ${user.id}`);
+          console.log(`✅ Sent evening message to user ${user.id}${isReminderTime ? ' (reminder)' : ''}`);
+          
+          // Сбрасываем напоминание, если сработало
+          if (isReminderTime) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { nextEveningMessageAt: null }
+            });
+          }
         } catch (error) {
           console.error(`❌ Failed to send evening message to user ${user.id}:`, error);
         }
@@ -290,80 +302,43 @@ async function sendSubscriptionReminders(bot: Bot<BotContext>) {
 // Функция для проверки окончания триала
 async function checkTrialExpiration(bot: Bot<BotContext>) {
     try {
+        const now = new Date();
+        
+        // Ищем пользователей с активной подпиской (триал), которые уже прошли 5 принципов
         const users = await prisma.user.findMany({
             where: {
                 isIntroCompleted: true,
-                introCompletedAt: { not: null },
+                currentPrincipleDay: { gt: 5 }, // Уже получили 5 принципов
                 subscription: {
-                   isActive: true, // Ищем активные подписки, которые могут истечь (триалы считаются активными пока не истекут)
-                   trialDaysUsed: { lt: 5 } // Где еще не зафиксировано полное прохождение триала (допустим 5 дней - порог)
+                   isActive: true
                 }
             },
             include: { subscription: true }
         });
 
-        const now = new Date();
-
         for (const user of users) {
-             const daysSinceIntro = Math.floor(
-                (now.getTime() - new Date(user.introCompletedAt!).getTime()) / (1000 * 60 * 60 * 24)
-             );
+             // Проверяем, не оплаченная ли это подписка
+             const isPaidSubscription = user.subscription?.expiresAt && user.subscription.expiresAt > now;
              
-             // Если прошло 5 дней (день 0 - интро, дни 1-4 контент, день 5 - уже конец триала)
-             // Или логика: интро (день 0) -> день 1 (1-й принцип) -> ... -> день 4 (4-й принцип)
-             // На 5-й день утром пользователь должен получить сообщение о конце триала ВМЕСТО принципа.
-             // В sendMorningMessages уже есть проверка: if (dayNumber > 4 && !isActive).
-             // Но нам нужно отправить СПЕЦИАЛЬНОЕ сообщение именно в момент перехода.
-             
-             // Однако, пользователь говорит: "status is active, trial of the day is 0 out of 4, but at the same time it is activated on November 21, and now it is already November 29".
-             // Проблема в том, что `trialDaysUsed` не обновляется сам по себе. Мы должны его инкрементировать или рассчитывать динамически.
-             // В текущей реализации `trialDaysUsed` обновлялся бы только если бы мы его явно инкрементировали где-то.
-             
-             // В sendMorningMessages мы считаем `dayNumber` динамически от даты.
-             // dayNumber = daysSinceIntro + 1;
-             
-             const dayNumber = daysSinceIntro + 1;
-             
-             // Если мы видим, что по факту времени прошло > 4 дней, но подписка все еще isActive (триальная), нужно её деактивировать и отправить письмо.
-             // Но только если мы еще не отправляли это письмо (можно проверить по trialDaysUsed или добавить флаг).
-             
-             // Поправим логику: будем считать триал завершенным, если dayNumber > 4.
-             // В этот момент мы должны:
-             // 1. Снять isActive
-             // 2. Отправить сообщение trial_expired
-             
-             // Проверяем, не истек ли уже триал
-             if (dayNumber > 4 && user.subscription?.isActive) {
-                 // Важно: если это не платная подписка. У нас пока нет разделения, считаем что isActive + trialDaysUsed < 5 = триал.
-                 // Но если человек купил подписку, у него будет isActive = true.
-                 // Как отличить? В модели Subscription есть expiresAt. Для триала он может быть null или установлен.
-                 // Давайте пока считать, что если expiresAt == null и isActive == true и прошло > 4 дней с интро -> это просроченный триал.
-                 // Или если expiresAt есть и он истек.
+             if (!isPaidSubscription) {
+                 console.log(`User ${user.id}: Trial expired (currentPrincipleDay: ${user.currentPrincipleDay}). Deactivating...`);
                  
-                 // В текущей реализации сидов expiresAt не ставится для триала.
+                 // Деактивируем
+                 await prisma.subscription.update({
+                     where: { userId: user.id },
+                     data: { isActive: false, trialDaysUsed: 5 }
+                 });
                  
-                 const isPaidSubscription = user.subscription.expiresAt && user.subscription.expiresAt > now;
+                 // Отправляем сообщение
+                 const message = await getBotMessage('trial_expired') || 'Триал завершен.';
                  
-                 if (!isPaidSubscription) {
-                     console.log(`User ${user.id}: Trial expired (Day ${dayNumber}). Deactivating...`);
-                     
-                     // Деактивируем
-                     await prisma.subscription.update({
-                         where: { userId: user.id },
-                         data: { isActive: false, trialDaysUsed: 5 } // Ставим 5, чтобы пометить как завершенный
+                 try {
+                     await bot.api.sendMessage(user.telegramId.toString(), message, {
+                         reply_markup: getTrialExpiredKeyboard()
                      });
-                     
-                     // Отправляем сообщение
-                     const message = await getBotMessage('trial_expired') || 'Триал завершен.';
-                     
-                     try {
-                         await bot.api.sendMessage(user.telegramId.toString(), message, {
-                             reply_markup: getTrialExpiredKeyboard()
-                         });
-                         console.log(`✅ Sent trial expired message to user ${user.id}`);
-                     } catch (e) {
-                         console.error(`Failed to send trial expired msg to ${user.id}`, e);
-                     }
+                     console.log(`✅ Sent trial expired message to user ${user.id}`);
+                 } catch (e) {
+                     console.error(`Failed to send trial expired msg to ${user.id}`, e);
                  }
              }
         }

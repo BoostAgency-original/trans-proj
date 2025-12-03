@@ -54,6 +54,7 @@ export function getEveningKeyboard() {
   return new InlineKeyboard()
     .text('📝 Записать в дневник', 'diary_add_evening').row()
     .text('🌙 Обсудить день', 'ai_discuss_day').row()
+    .text('⏰ Напомнить позже (2ч)', 'remind_evening_2h').row()
     .text('⏭ Пропустить день', 'skip_day');
 }
 
