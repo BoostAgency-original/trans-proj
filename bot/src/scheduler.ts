@@ -176,6 +176,14 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
               nextMorningMessageAt: isReminderTime ? null : user.nextMorningMessageAt
             }
           });
+          
+          // Обновляем trialDaysUsed (сколько триальных принципов получил, макс 5)
+          if (subscription && dayNumber <= 5) {
+            await prisma.subscription.update({
+              where: { userId: user.id },
+              data: { trialDaysUsed: dayNumber }
+            });
+          }
         } catch (error) {
           console.error(`❌ Failed to send morning message to user ${user.id}:`, error);
         }

@@ -139,18 +139,19 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
     });
 
     // Создаем или обновляем подписку (активируем триал)
+    // trialDaysUsed = 1, так как первый принцип отправляется сразу после интро
     await prisma.subscription.upsert({
         where: { userId: ctx.dbUser!.id },
         update: {
             isActive: true,
             activatedAt: new Date(),
-            trialDaysUsed: 0,
+            trialDaysUsed: 1,
         },
         create: {
             userId: ctx.dbUser!.id,
             isActive: true,
             activatedAt: new Date(),
-            trialDaysUsed: 0,
+            trialDaysUsed: 1,
         }
     });
 

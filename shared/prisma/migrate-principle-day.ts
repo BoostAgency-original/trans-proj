@@ -44,7 +44,11 @@ async function main() {
       calculatedDay = 6;
     }
 
-    // Если текущее значение уже 1 (дефолт) — обновляем
+    // Вычисляем trialDaysUsed (сколько триальных принципов получено, макс 5)
+    // calculatedDay = следующий принцип, значит получено calculatedDay - 1 принципов
+    const trialDaysUsed = Math.min(calculatedDay - 1, 5);
+
+    // Обновляем currentPrincipleDay
     if (user.currentPrincipleDay === 1 && calculatedDay !== 1) {
       await prisma.user.update({
         where: { id: user.id },
@@ -52,7 +56,16 @@ async function main() {
       });
       console.log(`User ${user.id}: currentPrincipleDay = ${calculatedDay} (days since intro: ${daysSinceIntro}, active: ${isActive})`);
     } else {
-      console.log(`User ${user.id}: Пропущен (уже установлено ${user.currentPrincipleDay})`);
+      console.log(`User ${user.id}: currentPrincipleDay пропущен (уже ${user.currentPrincipleDay})`);
+    }
+    
+    // Обновляем trialDaysUsed в подписке
+    if (user.subscription) {
+      await prisma.subscription.update({
+        where: { userId: user.id },
+        data: { trialDaysUsed }
+      });
+      console.log(`User ${user.id}: trialDaysUsed = ${trialDaysUsed}`);
     }
   }
 
