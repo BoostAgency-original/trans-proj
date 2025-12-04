@@ -86,6 +86,27 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       
       console.log(`Sending invoice: ${plan.title} for ${plan.amount} kopecks`);
 
+      // Данные для чека (фискализация ЮKassa)
+      // amount.value в рублях, vat_code=1 (без НДС), tax_system_code=2 (УСН доход)
+      const providerData = JSON.stringify({
+          receipt: {
+              items: [
+                  {
+                      description: plan.title,
+                      quantity: 1,
+                      amount: {
+                          value: (plan.amount / 100).toFixed(2), // в рублях
+                          currency: 'RUB'
+                      },
+                      vat_code: 1, // без НДС
+                      payment_mode: 'full_payment',
+                      payment_subject: 'service' // услуга
+                  }
+              ],
+              tax_system_code: 2 // УСН доход
+          }
+      });
+
       // Отправляем инвойс через Telegram Payments API (ЮКасса)
       try {
           await bot.api.sendInvoice(
@@ -96,7 +117,10 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
               'RUB',
               [{ label: plan.title, amount: plan.amount }],
               {
-                  provider_token: providerToken
+                  provider_token: providerToken,
+                  need_email: true, // запрашиваем email для чека
+                  send_email_to_provider: true, // отправляем email в ЮKassa
+                  provider_data: providerData // данные для чека
               }
           );
       } catch (error) {
