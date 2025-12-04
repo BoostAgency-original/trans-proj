@@ -94,10 +94,14 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
       }
 
       if (isRegularTime || isReminderTime) {
-        // Используем currentPrincipleDay — номер следующего принципа для отправки
-        let dayNumber = user.currentPrincipleDay;
+        // При напоминании отправляем тот же принцип (currentPrincipleDay - 1),
+        // так как счётчик уже был инкрементирован после первой отправки
+        let dayNumber = isReminderTime ? user.currentPrincipleDay - 1 : user.currentPrincipleDay;
         
-        console.log(`User ${user.id}: Current principle day: ${dayNumber}`);
+        // Защита от случая когда dayNumber = 0 (если напоминание сработало для дня 1)
+        if (dayNumber < 1) dayNumber = 1;
+        
+        console.log(`User ${user.id}: Principle day: ${dayNumber} (reminder: ${isReminderTime})`);
 
         // Проверка подписки (триал = первые 5 принципов)
         const subscription = user.subscription;
@@ -162,27 +166,31 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
             reply_markup: getMorningKeyboard(),
             parse_mode: 'HTML'
           });
-          console.log(`✅ Sent morning principle (Day ${dayNumber}) to user ${user.id}`);
+          console.log(`✅ Sent morning principle (Day ${dayNumber}) to user ${user.id}${isReminderTime ? ' (reminder)' : ''}`);
           
-          // Инкрементируем номер принципа для следующего раза
-          // Получаем общее количество принципов для зацикливания
-          const totalPrinciples = await prisma.transurfingPrinciple.count();
-          const nextDay = dayNumber >= totalPrinciples ? 1 : dayNumber + 1;
-          
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { 
-              currentPrincipleDay: nextDay,
-              nextMorningMessageAt: isReminderTime ? null : user.nextMorningMessageAt
-            }
-          });
-          
-          // Обновляем trialDaysUsed (сколько триальных принципов получил, макс 5)
-          if (subscription && dayNumber <= 5) {
-            await prisma.subscription.update({
-              where: { userId: user.id },
-              data: { trialDaysUsed: dayNumber }
+          // При напоминании только сбрасываем nextMorningMessageAt, не инкрементируем счётчик
+          if (isReminderTime) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { nextMorningMessageAt: null }
             });
+          } else {
+            // Инкрементируем номер принципа для следующего раза (только при обычной отправке)
+            const totalPrinciples = await prisma.transurfingPrinciple.count();
+            const nextDay = dayNumber >= totalPrinciples ? 1 : dayNumber + 1;
+            
+            await prisma.user.update({
+              where: { id: user.id },
+              data: { currentPrincipleDay: nextDay }
+            });
+            
+            // Обновляем trialDaysUsed (сколько триальных принципов получил, макс 5)
+            if (subscription && dayNumber <= 5) {
+              await prisma.subscription.update({
+                where: { userId: user.id },
+                data: { trialDaysUsed: dayNumber }
+              });
+            }
           }
         } catch (error) {
           console.error(`❌ Failed to send morning message to user ${user.id}:`, error);
