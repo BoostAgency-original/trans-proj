@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getUser } from '../api/api';
-import { ArrowLeft } from 'lucide-react';
+import { getUser, updateSubscription } from '../api/api';
+import { ArrowLeft, Gift } from 'lucide-react';
 import './UserDetail.css';
 
 interface User {
@@ -36,6 +36,9 @@ const UserDetail = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showGrantModal, setShowGrantModal] = useState(false);
+  const [grantDays, setGrantDays] = useState(30);
+  const [granting, setGranting] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -51,6 +54,35 @@ const UserDetail = () => {
       console.error('Error fetching user:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleGrantSubscription = async () => {
+    if (!user) return;
+    
+    setGranting(true);
+    try {
+      const currentExpiresAt = user.subscription?.expiresAt && new Date(user.subscription.expiresAt) > new Date()
+        ? new Date(user.subscription.expiresAt)
+        : new Date();
+      
+      const newExpiresAt = new Date(currentExpiresAt);
+      newExpiresAt.setDate(newExpiresAt.getDate() + grantDays);
+      
+      await updateSubscription(user.id, {
+        isActive: true,
+        expiresAt: newExpiresAt.toISOString()
+      });
+      
+      // Перезагружаем данные пользователя
+      await fetchUser(user.id);
+      setShowGrantModal(false);
+      alert(`Подписка выдана на ${grantDays} дней!`);
+    } catch (error) {
+      console.error('Error granting subscription:', error);
+      alert('Ошибка при выдаче подписки');
+    } finally {
+      setGranting(false);
     }
   };
 
@@ -122,7 +154,13 @@ const UserDetail = () => {
       </div>
 
       <div className="detail-card">
-        <h2>Подписка</h2>
+        <div className="card-header">
+          <h2>Подписка</h2>
+          <button className="grant-btn" onClick={() => setShowGrantModal(true)}>
+            <Gift size={16} />
+            Выдать подписку
+          </button>
+        </div>
         {user.subscription ? (
           <div className="info-grid">
             <div className="info-item">
@@ -133,7 +171,7 @@ const UserDetail = () => {
             </div>
             <div className="info-item">
               <span className="info-label">Использовано триал-дней:</span>
-              <span className="info-value">{user.subscription.trialDaysUsed}/4</span>
+              <span className="info-value">{user.subscription.trialDaysUsed}/5</span>
             </div>
             {user.subscription.activatedAt && (
               <div className="info-item">
@@ -156,6 +194,68 @@ const UserDetail = () => {
           <p>Нет данных о подписке</p>
         )}
       </div>
+
+      {/* Модальное окно выдачи подписки */}
+      {showGrantModal && (
+        <div className="modal-overlay" onClick={() => setShowGrantModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Выдать подписку</h3>
+            <p>Выберите срок подписки для пользователя {user.name || user.firstName || 'ID: ' + user.id}</p>
+            
+            <div className="grant-options">
+              <label>
+                <input
+                  type="radio"
+                  value={7}
+                  checked={grantDays === 7}
+                  onChange={() => setGrantDays(7)}
+                />
+                7 дней
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  value={30}
+                  checked={grantDays === 30}
+                  onChange={() => setGrantDays(30)}
+                />
+                30 дней
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  value={80}
+                  checked={grantDays === 80}
+                  onChange={() => setGrantDays(80)}
+                />
+                80 дней
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  value={365}
+                  checked={grantDays === 365}
+                  onChange={() => setGrantDays(365)}
+                />
+                1 год
+              </label>
+            </div>
+            
+            <div className="modal-actions">
+              <button className="cancel-btn" onClick={() => setShowGrantModal(false)}>
+                Отмена
+              </button>
+              <button 
+                className="confirm-btn" 
+                onClick={handleGrantSubscription}
+                disabled={granting}
+              >
+                {granting ? 'Выдача...' : 'Выдать'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="detail-card">
         <h2>Дневник наблюдений ({user.diaryEntries.length})</h2>
