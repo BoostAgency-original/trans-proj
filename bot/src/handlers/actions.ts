@@ -24,10 +24,8 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
     ctx.session.data.diaryType = 'morning';
     
     const user = ctx.dbUser!;
-    let dayNumber = 1;
-    if (user.introCompletedAt) {
-        dayNumber = Math.floor((Date.now() - user.introCompletedAt.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    }
+    // Текущий принцип = currentPrincipleDay - 1
+    const dayNumber = Math.max(1, user.currentPrincipleDay - 1);
     ctx.session.data.currentDiaryDay = dayNumber;
 
     await ctx.reply(
@@ -47,10 +45,8 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
     ctx.session.data.diaryType = 'evening';
     
     const user = ctx.dbUser!;
-    let dayNumber = 1;
-    if (user.introCompletedAt) {
-        dayNumber = Math.floor((Date.now() - user.introCompletedAt.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    }
+    // Текущий принцип = currentPrincipleDay - 1
+    const dayNumber = Math.max(1, user.currentPrincipleDay - 1);
     ctx.session.data.currentDiaryDay = dayNumber;
 
     await ctx.reply(
@@ -93,10 +89,9 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
   bot.callbackQuery('ai_discuss_principle', async (ctx) => {
     const user = ctx.dbUser!;
     
-    let dayNumber = 1;
-    if (user.introCompletedAt) {
-        dayNumber = Math.floor((Date.now() - user.introCompletedAt.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    }
+    // Текущий принцип = currentPrincipleDay - 1 (счётчик указывает на СЛЕДУЮЩИЙ)
+    // Минимум 1, чтобы не было 0
+    const dayNumber = Math.max(1, user.currentPrincipleDay - 1);
     
     const principle = await prisma.transurfingPrinciple.findUnique({ where: { dayNumber } });
     
@@ -125,11 +120,8 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
   bot.callbackQuery('ai_discuss_day', async (ctx) => {
     const user = ctx.dbUser!;
     
-    // Определяем день
-    let dayNumber = 1;
-    if (user.introCompletedAt) {
-        dayNumber = Math.floor((Date.now() - user.introCompletedAt.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-    }
+    // Текущий принцип = currentPrincipleDay - 1
+    const dayNumber = Math.max(1, user.currentPrincipleDay - 1);
 
     // Получаем принцип для контекста
     const principle = await prisma.transurfingPrinciple.findUnique({ where: { dayNumber } });
