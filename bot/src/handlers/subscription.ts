@@ -6,6 +6,94 @@ import { getMessage } from '../services/messages';
 
 const prisma = new PrismaClient();
 
+const PAYMENTS_DISABLED = process.env.DISABLE_PAYMENTS === 'true';
+
+function escapeHtml(input: string): string {
+  return input
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function buildGiftLink(token: string): { link?: string; startCmd: string } {
+  const botUsername = process.env.BOT_USERNAME;
+  const link = botUsername ? `https://t.me/${botUsername}?start=gift_${token}` : undefined;
+  return { link, startCmd: `/start gift_${token}` };
+}
+
+function buildGiftShareReplyMarkup(opts: {
+  shareText: string;
+  link?: string;
+  token: string;
+}) {
+  // Надёжный "шаринг" без inline-mode: Telegram открывает окно отправки в чат с предзаполненным текстом
+  // https://core.telegram.org/widgets/share
+  const shareUrl =
+    `https://t.me/share/url?` +
+    `url=${encodeURIComponent(opts.link ?? '')}` +
+    `&text=${encodeURIComponent(opts.shareText)}`;
+
+  const keyboard: any = {
+    inline_keyboard: [[{ text: '📨 Отправить другу', url: shareUrl }]],
+  };
+
+  if (opts.link) {
+    keyboard.inline_keyboard.push([{ text: '🔗 Открыть ссылку', url: opts.link }]);
+  } else {
+    keyboard.inline_keyboard.push([{ text: '📋 Показать команду', callback_data: `gift_cmd_${opts.token}` }]);
+  }
+
+  keyboard.inline_keyboard.push([{ text: '🚪 В меню', callback_data: 'menu_main' }]);
+  return keyboard;
+}
+
+async function sendGiftCardToBuyer(ctx: BotContext, opts: { token: string; plan: (typeof PLANS)[PlanId]; isTest: boolean }) {
+  const { link, startCmd } = buildGiftLink(opts.token);
+
+  const defaultCard =
+    `🎁 <b>Подарок: подписка на {duration}</b>\n\n` +
+    `Это небольшой «сдвиг реальности» — знак заботы без лишней важности.\n\n` +
+    `<b>Как активировать</b>:\n` +
+    `1) Открой: <a href="{link}">активировать подарок</a>\n` +
+    `2) Или отправь боту: <code>{start_cmd}</code>\n\n` +
+    `<i>Подарок одноразовый — после активации ссылка перестанет работать.</i>`;
+
+  const defaultShare =
+    `🎁 Подарок: подписка на {duration}\n\n` +
+    `Нажми «Старт» по ссылке, чтобы активировать:\n{link}\n\n` +
+    `Если ссылка не открывается — отправь боту:\n{start_cmd}\n\n` +
+    `Подарок одноразовый.`;
+
+  const cardTemplate = await getMessage('gift_card', defaultCard);
+  const shareTemplate = await getMessage('gift_share_text', defaultShare);
+
+  const safeDuration = escapeHtml(opts.plan.duration);
+  const safeLink = link ? escapeHtml(link) : '';
+  const safeStartCmd = escapeHtml(startCmd);
+
+  const cardHtml = cardTemplate
+    .replaceAll('{duration}', safeDuration)
+    .replaceAll('{days}', String(opts.plan.days))
+    .replaceAll('{link}', safeLink || safeStartCmd)
+    .replaceAll('{start_cmd}', safeStartCmd);
+
+  const shareText = shareTemplate
+    .replaceAll('{duration}', opts.plan.duration)
+    .replaceAll('{days}', String(opts.plan.days))
+    .replaceAll('{link}', link ?? startCmd)
+    .replaceAll('{start_cmd}', startCmd);
+
+  const header = opts.isTest ? '🧪 Тестовый режим: подарок создан без оплаты.\n\n' : '✅ Подарок готов.\n\n';
+  const textToSend = header + cardHtml;
+
+  await ctx.reply(textToSend, {
+    parse_mode: 'HTML',
+    reply_markup: buildGiftShareReplyMarkup({ shareText, link, token: opts.token }),
+  });
+}
+
 // Данные о тарифах
 const PLANS = {
     sub_plan_week: {
@@ -93,6 +181,12 @@ async function sendFirstPrinciple(ctx: BotContext) {
 }
 
 export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
+  // Показать /start-команду для подарка (если BOT_USERNAME не задан)
+  bot.callbackQuery(/^gift_cmd_(.+)$/, async (ctx) => {
+    const token = ctx.match[1];
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`Команда для друга:\n<code>/start gift_${escapeHtml(token)}</code>`, { parse_mode: 'HTML' });
+  });
   
   // Кнопка "Продолжить путь" (из сообщения о конце триала) или "Подписка" из меню
   bot.callbackQuery(['menu_subscription', 'sub_activate'], async (ctx) => {
@@ -133,6 +227,55 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       const planId = ctx.match[1] as PlanId;
       const plan = PLANS[planId];
 
+      // Локальный тестовый режим: без реальной оплаты
+      if (PAYMENTS_DISABLED) {
+          await ctx.answerCallbackQuery();
+          const user = ctx.dbUser!;
+          const now = new Date();
+          const currentExpiresAt =
+            user.subscription?.expiresAt && user.subscription.expiresAt > now
+              ? user.subscription.expiresAt
+              : now;
+          const newExpiresAt = new Date(currentExpiresAt);
+          newExpiresAt.setDate(newExpiresAt.getDate() + plan.days);
+
+          await prisma.subscription.upsert({
+              where: { userId: user.id },
+              update: {
+                  isActive: true,
+                  expiresAt: newExpiresAt,
+                  updatedAt: new Date()
+              },
+              create: {
+                  userId: user.id,
+                  isActive: true,
+                  activatedAt: new Date(),
+                  expiresAt: newExpiresAt,
+                  trialDaysUsed: user.subscription?.trialDaysUsed || 0
+              }
+          });
+
+          await ctx.reply(
+              `🧪 Тестовый режим: подписка выдана без оплаты.\n\n` +
+              `Ваша подписка продлена до ${newExpiresAt.toLocaleDateString('ru-RU')}.`,
+              { reply_markup: getMainMenuKeyboard() }
+          );
+
+          // Если практика ещё не стартовала — стартуем и отправим 1-й принцип
+          if (user.isIntroCompleted && !user.introCompletedAt) {
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                introCompletedAt: now,
+                currentPrincipleDay: 2,
+                lastPrincipleSentAt: now,
+              } as any,
+            });
+            await sendFirstPrinciple(ctx);
+          }
+          return;
+      }
+
       const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
       
       if (!providerToken) {
@@ -168,9 +311,11 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
   bot.callbackQuery(['promo_buy_month_299', 'promo_buy_80days_799'], async (ctx) => {
     const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
     if (!providerToken) {
-      await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
-      console.error('PAYMENT_PROVIDER_TOKEN is missing');
-      return;
+      if (!PAYMENTS_DISABLED) {
+        await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
+        console.error('PAYMENT_PROVIDER_TOKEN is missing');
+        return;
+      }
     }
 
     const user = ctx.dbUser!;
@@ -191,10 +336,56 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
 
     await ctx.answerCallbackQuery();
     try {
+      // Тестовый режим: выдаём подписку без оплаты
+      if (PAYMENTS_DISABLED) {
+        const now = new Date();
+        const currentExpiresAt =
+          user.subscription?.expiresAt && user.subscription.expiresAt > now
+            ? user.subscription.expiresAt
+            : now;
+        const newExpiresAt = new Date(currentExpiresAt);
+        newExpiresAt.setDate(newExpiresAt.getDate() + plan.days);
+
+        await prisma.subscription.upsert({
+          where: { userId: user.id },
+          update: {
+            isActive: true,
+            expiresAt: newExpiresAt,
+            updatedAt: new Date(),
+          },
+          create: {
+            userId: user.id,
+            isActive: true,
+            activatedAt: new Date(),
+            expiresAt: newExpiresAt,
+            trialDaysUsed: user.subscription?.trialDaysUsed || 0,
+          },
+        });
+
+        await ctx.reply(
+          `🧪 Тестовый режим: подписка выдана без оплаты.\n\n` +
+            `Ваша подписка продлена до ${newExpiresAt.toLocaleDateString('ru-RU')}.`,
+          { reply_markup: getMainMenuKeyboard() }
+        );
+
+        if (user.isIntroCompleted && !user.introCompletedAt) {
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              introCompletedAt: now,
+              currentPrincipleDay: 2,
+              lastPrincipleSentAt: now,
+            } as any,
+          });
+          await sendFirstPrinciple(ctx);
+        }
+        return;
+      }
+
       await sendInvoiceWithReceipt(
         bot,
         ctx.chat!.id,
-        providerToken,
+        providerToken!,
         title,
         description,
         planId, // payload оставляем обычным, скидка действует только в этом сценарии
@@ -221,7 +412,7 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       `🎁 Подарить подписку\n\n` +
       `Тариф: ${plan.duration}\n` +
       `Стоимость: ${plan.amount / 100} ₽\n\n` +
-      `После оплаты я дам ссылку — её нужно переслать другу.`;
+      `После оплаты я пришлю «подарочную открытку» — её можно переслать другу или отправить в чат кнопкой.`;
 
     const keyboard = new InlineKeyboard()
       .text('💳 Купить подарок', `confirm_gift_${planId}`)
@@ -245,7 +436,7 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
     }
 
     const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
-    if (!providerToken) {
+    if (!providerToken && !PAYMENTS_DISABLED) {
       await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
       console.error('PAYMENT_PROVIDER_TOKEN is missing');
       return;
@@ -265,10 +456,21 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
     await ctx.answerCallbackQuery();
 
     try {
+      // Тестовый режим: считаем подарок сразу оплаченным и отдаём ссылку
+      if (PAYMENTS_DISABLED) {
+        await prisma.giftSubscription.update({
+          where: { token: gift.token },
+          data: { status: 'paid', paidAt: new Date() },
+        });
+
+        await sendGiftCardToBuyer(ctx, { token: gift.token, plan, isTest: true });
+        return;
+      }
+
       await sendInvoiceWithReceipt(
         bot,
         ctx.chat!.id,
-        providerToken,
+        providerToken!,
         `Подарок: ${plan.title}`,
         `Подарочная подписка на ${plan.duration}`,
         `gift:${gift.token}`,
@@ -313,16 +515,12 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
           data: { status: 'paid', paidAt: new Date() },
         });
 
-        const botUsername = process.env.BOT_USERNAME;
-        const link = botUsername ? `https://t.me/${botUsername}?start=gift_${token}` : undefined;
-
-        await ctx.reply(
-          `🎁 Подарок оплачен!\n\n` +
-            (link
-              ? `Отправь другу эту ссылку:\n${link}\n\nОна одноразовая — после активации перестанет работать.`
-              : `Отправь другу команду:\n/start gift_${token}\n\n(Чтобы ссылка работала как URL — добавь BOT_USERNAME в env.)`),
-          { reply_markup: getMainMenuKeyboard() }
-        );
+        const plan = PLANS[gift.planId as PlanId];
+        if (!plan) {
+          console.error('Unknown gift planId in db:', gift.planId);
+          return;
+        }
+        await sendGiftCardToBuyer(ctx, { token, plan, isTest: false });
         return;
       }
 

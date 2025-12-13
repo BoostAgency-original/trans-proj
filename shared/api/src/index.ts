@@ -8,6 +8,7 @@ import { settingsRoutes } from './routes/settings';
 import { diaryRoutes } from './routes/diary';
 import { principleRoutes } from './routes/principles';
 import { authRoutes } from './routes/auth';
+import { broadcastRoutes } from './routes/broadcasts';
 import { authMiddleware } from './middleware/authMiddleware';
 
 dotenv.config();
@@ -46,6 +47,7 @@ app.use('/api/messages', messageRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/diary', diaryRoutes);
 app.use('/api/principles', principleRoutes);
+app.use('/api/broadcasts', broadcastRoutes);
 
 app.listen(PORT, () => {
   console.log(`🚀 API server запущен на порту ${PORT}`);

@@ -79,4 +79,10 @@ export const getDiaryEntries = (userId?: number, principle?: number) =>
   api.get('/diary', { params: { userId, principle } });
 export const getDiaryStats = () => api.get('/diary/stats');
 
+// Broadcasts
+export const getBroadcastStats = () => api.get('/broadcasts/stats');
+export const getBroadcasts = (limit: number = 20) => api.get('/broadcasts', { params: { limit } });
+export const createBroadcast = (data: any) => api.post('/broadcasts', data);
+export const cancelBroadcast = (id: number) => api.post(`/broadcasts/${id}/cancel`);
+
 export default api;

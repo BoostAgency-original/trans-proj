@@ -171,3 +171,26 @@ model Payment {
 
   @@map("payments")
 }
+
+model Broadcast {
+  id                 Int      @id @default(autoincrement())
+  audience           String   // all | intro_not_completed | paid_active | no_paid_active
+  text               String   @db.Text
+  parseMode          String?  // 'HTML' | 'MarkdownV2' | null (plain)
+  status             String   @default("pending") // pending | running | completed | cancelled | failed
+
+  totalTargets       Int      @default(0)
+  sentCount          Int      @default(0)
+  failedCount        Int      @default(0)
+  lastProcessedUserId Int?
+  error              String?  @db.Text
+
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  startedAt          DateTime?
+  finishedAt         DateTime?
+  cancelledAt        DateTime?
+
+  @@index([status, createdAt])
+  @@map("broadcasts")
+}

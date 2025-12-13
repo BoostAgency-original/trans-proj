@@ -1,5 +1,5 @@
 import { Bot } from 'grammy';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, type Prisma } from '@prisma/client';
 import type { BotContext } from './types';
 import { getMorningKeyboard, getEveningKeyboard, getTrialExpiredKeyboard, getSubscriptionKeyboard, getWeeklyAnalyticsKeyboard } from './keyboards';
 import OpenAI from 'openai';
@@ -7,6 +7,149 @@ import OpenAI from 'openai';
 const prisma = new PrismaClient();
 
 const TRIAL_DAYS = 7; // триал = первые 7 принципов/дней
+
+const BROADCAST_BATCH_SIZE = Math.min(Math.max(parseInt(process.env.BROADCAST_BATCH_SIZE || '25', 10) || 25, 1), 100);
+const BROADCAST_INTERVAL_MS = Math.min(Math.max(parseInt(process.env.BROADCAST_INTERVAL_MS || '5000', 10) || 5000, 500), 60000);
+let isBroadcastProcessing = false;
+let isBroadcastFeatureUnavailable = false;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getBroadcastAudienceWhere(audience: string, now: Date): Prisma.UserWhereInput {
+  switch (audience) {
+    case 'all':
+      return {};
+    case 'intro_not_completed':
+      return { isIntroCompleted: false };
+    case 'paid_active':
+      return {
+        subscription: {
+          is: { isActive: true, expiresAt: { gt: now } },
+        },
+      };
+    case 'no_paid_active':
+      return {
+        OR: [
+          { subscription: { is: null } },
+          { subscription: { is: { expiresAt: null } } },
+          { subscription: { is: { expiresAt: { lte: now } } } },
+          { subscription: { is: { isActive: false } } },
+        ],
+      };
+    default:
+      return {};
+  }
+}
+
+async function processBroadcasts(bot: Bot<BotContext>) {
+  if (isBroadcastFeatureUnavailable) return;
+  if (isBroadcastProcessing) return;
+  isBroadcastProcessing = true;
+
+  try {
+    const job = await prisma.broadcast.findFirst({
+      where: { status: { in: ['pending', 'running'] } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!job) return;
+
+    const now = new Date();
+
+    // Если только что создан — посчитаем аудиторию и запустим
+    if (job.status === 'pending') {
+      const totalTargets = await prisma.user.count({ where: getBroadcastAudienceWhere(job.audience, now) });
+      await prisma.broadcast.update({
+        where: { id: job.id },
+        data: {
+          status: 'running',
+          startedAt: now,
+          totalTargets,
+          lastProcessedUserId: job.lastProcessedUserId ?? 0,
+        },
+      });
+    }
+
+    // Обновим job после возможного апдейта
+    const current = await prisma.broadcast.findUnique({ where: { id: job.id } });
+    if (!current) return;
+    if (current.status !== 'running') return;
+
+    const cursor = current.lastProcessedUserId ?? 0;
+    const users = await prisma.user.findMany({
+      where: { ...getBroadcastAudienceWhere(current.audience, now), id: { gt: cursor } },
+      orderBy: { id: 'asc' },
+      take: BROADCAST_BATCH_SIZE,
+      select: { id: true, telegramId: true },
+    });
+
+    if (users.length === 0) {
+      await prisma.broadcast.update({
+        where: { id: current.id },
+        data: { status: 'completed', finishedAt: new Date() },
+      });
+      return;
+    }
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const u of users) {
+      try {
+        const options: any = {};
+        if (current.parseMode === 'HTML' || current.parseMode === 'MarkdownV2') {
+          options.parse_mode = current.parseMode;
+        }
+        await bot.api.sendMessage(u.telegramId.toString(), current.text, options);
+        sent += 1;
+      } catch (e) {
+        failed += 1;
+      }
+      // небольшой троттлинг, чтобы не упереться в лимиты Telegram
+      await sleep(40);
+    }
+
+    const lastId = users[users.length - 1]!.id;
+
+    const shouldFinish = users.length < BROADCAST_BATCH_SIZE;
+    await prisma.broadcast.update({
+      where: { id: current.id },
+      data: {
+        sentCount: { increment: sent },
+        failedCount: { increment: failed },
+        lastProcessedUserId: lastId,
+        ...(shouldFinish ? { status: 'completed', finishedAt: new Date() } : {}),
+      },
+    });
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    // Если таблицы ещё нет (миграции не применены) — отключаем воркер, чтобы не спамить логами
+    if (msg.includes('broadcasts') && (msg.includes('does not exist') || msg.includes('P2021'))) {
+      isBroadcastFeatureUnavailable = true;
+      console.warn('Broadcast feature disabled: migrations not applied yet (broadcasts table missing).');
+      return;
+    }
+
+    console.error('Error processing broadcasts:', e);
+    // На всякий случай пометим текущую pending/running рассылку как failed
+    try {
+      const job = await prisma.broadcast.findFirst({
+        where: { status: { in: ['pending', 'running'] } },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (job) {
+        await prisma.broadcast.update({
+          where: { id: job.id },
+          data: { status: 'failed', error: msg, finishedAt: new Date() },
+        });
+      }
+    } catch {}
+  } finally {
+    isBroadcastProcessing = false;
+  }
+}
 
 const openai = new OpenAI({
   baseURL: 'https://openrouter.ai/api/v1',
@@ -533,6 +676,11 @@ export async function startScheduler(bot: Bot<BotContext>) {
     await sendEveningMessages(bot);
 
   }, 60000); // Каждую минуту
+
+  // Отдельный воркер рассылок (быстрее, чем минутный цикл)
+  setInterval(() => {
+    void processBroadcasts(bot);
+  }, BROADCAST_INTERVAL_MS);
 
   console.log('✅ Планировщик задач запущен');
 }
