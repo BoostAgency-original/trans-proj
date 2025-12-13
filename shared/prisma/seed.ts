@@ -305,7 +305,9 @@ async function main() {
   for (const message of messages) {
     await prisma.botMessage.upsert({
       where: { key: message.key },
-      update: { text: message.text, category: message.category, description: message.description },
+      // Важно: не затираем text, если он уже был изменён в админке.
+      // Обновляем только метаданные.
+      update: { category: message.category, description: message.description },
       create: message,
     });
   }
