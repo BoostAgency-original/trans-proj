@@ -5,6 +5,8 @@ import { getMorningKeyboard, getEveningKeyboard, getTrialExpiredKeyboard, getSub
 
 const prisma = new PrismaClient();
 
+const TRIAL_DAYS = 7; // триал = первые 7 принципов/дней
+
 // Функция для получения текущего времени в формате HH:mm в определенной timezone
 function getCurrentTimeInTimezone(timezone: string): string {
   try {
@@ -103,16 +105,19 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
         
         console.log(`User ${user.id}: Principle day: ${dayNumber} (reminder: ${isReminderTime})`);
 
-        // Проверка подписки (триал = первые 5 принципов)
+        // Проверка подписки (триал = первые 7 принципов)
         const subscription = user.subscription;
-        const isActive = subscription?.isActive || false;
-        
-        // Если следующий принцип > 5 и подписка неактивна — показываем сообщение о подписке
-        if (dayNumber > 5 && !isActive) {
+        const isPaidSubscription =
+          !!(subscription?.isActive && subscription.expiresAt && subscription.expiresAt > now);
+        const isTrialSubscription = !!(subscription?.isActive && !isPaidSubscription);
+        const hasTrialAccess = isTrialSubscription && dayNumber <= TRIAL_DAYS;
+
+        // Если принцип за пределами триала и нет активной платной подписки — показываем сообщение о подписке
+        if (!isPaidSubscription && !hasTrialAccess) {
             console.log(`User ${user.id}: Subscription required (Day ${dayNumber})`);
             const subMsg = await getBotMessage('subscription_inactive') || `Ты проснулся в сновидении. Это уже сила.
 
-Эти пять дней были не случайны. Ты почувствовал — что-то в тебе меняется.
+Эти семь дней были не случайны. Ты почувствовал — что-то в тебе меняется.
 Мир стал чуть мягче. Внутри — чуть яснее.
 Это работает.
 
@@ -123,13 +128,30 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
 Осталось 73 шага.
 
 Открой практику полностью — и начни управлять реальностью осознанно.`;
+            const used = subscription?.trialDaysUsed ?? 0;
+            const finalMsg = subMsg
+              .replace('{trial_days}', used.toString()) // обратная совместимость
+              .replace('{trial_used}', used.toString())
+              .replace('{trial_total}', TRIAL_DAYS.toString());
             
              try {
-              await bot.api.sendMessage(user.telegramId.toString(), subMsg, {
+              await bot.api.sendMessage(user.telegramId.toString(), finalMsg, {
                   reply_markup: getSubscriptionKeyboard()
               });
             } catch (e) {
                 console.error(`Failed to send sub message to ${user.id}`, e);
+            }
+
+            // На всякий случай “закрываем” триал в БД при первом выходе за лимит
+            if (subscription?.isActive && !isPaidSubscription) {
+              try {
+                await prisma.subscription.update({
+                  where: { userId: user.id },
+                  data: { isActive: false, trialDaysUsed: Math.max(used, TRIAL_DAYS) },
+                });
+              } catch (e) {
+                console.error(`Failed to deactivate trial for ${user.id}`, e);
+              }
             }
             continue;
         }
@@ -184,8 +206,8 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
               data: { currentPrincipleDay: nextDay }
             });
             
-            // Обновляем trialDaysUsed (сколько триальных принципов получил, макс 5)
-            if (subscription && dayNumber <= 5) {
+            // Обновляем trialDaysUsed (сколько триальных принципов получил, макс 7)
+            if (subscription && dayNumber <= TRIAL_DAYS) {
               await prisma.subscription.update({
                 where: { userId: user.id },
                 data: { trialDaysUsed: dayNumber }
@@ -234,12 +256,12 @@ async function sendEveningMessages(bot: Bot<BotContext>) {
       }
 
       if (isRegularTime || isReminderTime) {
-        // Проверка подписки (триал = первые 5 принципов)
+        // Проверка подписки (триал = первые 7 принципов)
         const subscription = user.subscription;
         const isActive = subscription?.isActive || false;
 
-        // Если уже получил 5 принципов и подписка неактивна — вечером не отправляем
-        if (user.currentPrincipleDay > 5 && !isActive) {
+        // Если триал уже закончился (следующий принцип > 7) и подписка неактивна — вечером не отправляем
+        if (user.currentPrincipleDay > TRIAL_DAYS && !isActive) {
            continue;
         }
         
@@ -318,47 +340,9 @@ async function sendSubscriptionReminders(bot: Bot<BotContext>) {
 // Функция для проверки окончания триала
 async function checkTrialExpiration(bot: Bot<BotContext>) {
     try {
-        const now = new Date();
-        
-        // Ищем пользователей с активной подпиской (триал), которые уже прошли 5 принципов
-        const users = await prisma.user.findMany({
-            where: {
-                isIntroCompleted: true,
-                currentPrincipleDay: { gt: 5 }, // Уже получили 5 принципов
-                subscription: {
-                   isActive: true
-                }
-            },
-            include: { subscription: true }
-        });
-
-        for (const user of users) {
-             // Проверяем, не оплаченная ли это подписка
-             const isPaidSubscription = user.subscription?.expiresAt && user.subscription.expiresAt > now;
-             
-             if (!isPaidSubscription) {
-                 console.log(`User ${user.id}: Trial expired (currentPrincipleDay: ${user.currentPrincipleDay}). Deactivating...`);
-                 
-                 // Деактивируем
-                 await prisma.subscription.update({
-                     where: { userId: user.id },
-                     data: { isActive: false, trialDaysUsed: 5 }
-                 });
-                 
-                 // Отправляем сообщение
-                 const message = await getBotMessage('trial_expired') || 'Триал завершен.';
-                 
-                 try {
-                     await bot.api.sendMessage(user.telegramId.toString(), message, {
-                         reply_markup: getTrialExpiredKeyboard()
-                     });
-                     console.log(`✅ Sent trial expired message to user ${user.id}`);
-                 } catch (e) {
-                     console.error(`Failed to send trial expired msg to ${user.id}`, e);
-                 }
-             }
-        }
-
+        // Легаси-функция оставлена намеренно.
+        // Деактивация триала выполняется в sendMorningMessages при первом выходе за лимит.
+        void bot;
     } catch (e) {
         console.error('Error in checkTrialExpiration:', e);
     }

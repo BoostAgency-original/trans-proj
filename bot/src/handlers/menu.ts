@@ -6,6 +6,8 @@ import { showDiaryList } from './diary';
 import { requireAccess } from '../services/access';
 
 export function setupMenuHandlers(bot: Bot<BotContext>) {
+  const TRIAL_DAYS = 7;
+
   // Кнопка "Канал"
   bot.callbackQuery('menu_channel', async (ctx) => {
     const channelUrl = process.env.TELEGRAM_CHANNEL_URL || 'https://t.me/your_channel';
@@ -24,7 +26,7 @@ export function setupMenuHandlers(bot: Bot<BotContext>) {
     const subscription = user?.subscription;
     
     // Проверяем, есть ли активная платная подписка (isActive + expiresAt > now)
-    // Или активный триал? (isActive + expiresAt is null + days < 5)
+    // Или активный триал? (isActive + expiresAt is null + days < 7)
     // ТЗ: "No subscription? then you should have buttons for a week, a month, 80 days and technical support and exit."
     // Если подписка активна - просто пишем статус.
     
@@ -42,7 +44,7 @@ export function setupMenuHandlers(bot: Bot<BotContext>) {
     } else if (isTrialActive) {
         // Триал (или просто активная без даты, считаем триалом)
         const daysUsed = subscription?.trialDaysUsed || 0;
-        statusText += `✅ Статус: Пробный период\n📅 День: ${daysUsed}/4\n\nВы можете продлить подписку заранее:`;
+        statusText += `✅ Статус: Пробный период\n📅 День: ${Math.min(daysUsed, TRIAL_DAYS)}/${TRIAL_DAYS}\n\nВы можете продлить подписку заранее:`;
         keyboard = getSubscriptionKeyboard(); // Показываем тарифы
     } else {
       statusText += `❌ Статус: Не активна\n\nВыберите подходящий тариф для продолжения:`;

@@ -4,7 +4,7 @@
  * 
  * Логика:
  * - Для пользователей с introCompletedAt считаем сколько дней прошло
- * - Если подписка неактивна и триал закончен — ставим 6 (первый платный принцип)
+ * - Если подписка неактивна и триал закончен — ставим 8 (первый платный принцип после 7)
  * - Если подписка активна — ставим daysSinceIntro + 2 (1 принцип при интро + дни)
  */
 
@@ -39,14 +39,14 @@ async function main() {
     const isActive = user.subscription?.isActive || false;
     const isPaid = user.subscription?.expiresAt && user.subscription.expiresAt > now;
     
-    // Если подписка неактивна и не оплачена — ограничиваем 6 (первый платный)
-    if (!isActive && !isPaid && calculatedDay > 6) {
-      calculatedDay = 6;
+    // Если подписка неактивна и не оплачена — ограничиваем 8 (первый платный после триала 7)
+    if (!isActive && !isPaid && calculatedDay > 8) {
+      calculatedDay = 8;
     }
 
-    // Вычисляем trialDaysUsed (сколько триальных принципов получено, макс 5)
+    // Вычисляем trialDaysUsed (сколько триальных принципов получено, макс 7)
     // calculatedDay = следующий принцип, значит получено calculatedDay - 1 принципов
-    const trialDaysUsed = Math.min(calculatedDay - 1, 5);
+    const trialDaysUsed = Math.min(calculatedDay - 1, 7);
 
     // Обновляем currentPrincipleDay
     if (user.currentPrincipleDay === 1 && calculatedDay !== 1) {

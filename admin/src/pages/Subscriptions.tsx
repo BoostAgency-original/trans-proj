@@ -78,7 +78,7 @@ const Subscriptions = () => {
                     {sub.isActive ? 'Активна' : 'Неактивна'}
                   </span>
                 </td>
-                <td>{sub.trialDaysUsed}/4</td>
+                <td>{sub.trialDaysUsed}/7</td>
                 <td>
                   {sub.activatedAt
                     ? new Date(sub.activatedAt).toLocaleDateString('ru-RU')

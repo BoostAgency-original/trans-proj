@@ -41,7 +41,7 @@ model Subscription {
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   isActive          Boolean  @default(false)
   activatedAt       DateTime?
-  trialDaysUsed     Int      @default(0) // Для отслеживания 4-дневного триала
+  trialDaysUsed     Int      @default(0) // Для отслеживания 7-дневного триала
   expiresAt         DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt

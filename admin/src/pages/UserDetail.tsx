@@ -171,7 +171,7 @@ const UserDetail = () => {
             </div>
             <div className="info-item">
               <span className="info-label">Использовано триал-дней:</span>
-              <span className="info-value">{user.subscription.trialDaysUsed}/5</span>
+              <span className="info-value">{user.subscription.trialDaysUsed}/7</span>
             </div>
             {user.subscription.activatedAt && (
               <div className="info-item">
