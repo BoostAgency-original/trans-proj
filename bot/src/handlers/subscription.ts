@@ -208,6 +208,80 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
     }
   });
   
+  // Подарок подписки: подтверждение и создание инвойса
+  bot.callbackQuery(/^gift_plan_(.+)$/, async (ctx) => {
+    const planId = ctx.match[1] as PlanId;
+    const plan = PLANS[planId];
+    if (!plan) {
+      await ctx.answerCallbackQuery('Неизвестный тариф');
+      return;
+    }
+
+    const confirmText =
+      `🎁 Подарить подписку\n\n` +
+      `Тариф: ${plan.duration}\n` +
+      `Стоимость: ${plan.amount / 100} ₽\n\n` +
+      `После оплаты я дам ссылку — её нужно переслать другу.`;
+
+    const keyboard = new InlineKeyboard()
+      .text('💳 Купить подарок', `confirm_gift_${planId}`)
+      .row()
+      .text('« Назад', 'menu_gift');
+
+    try {
+      await ctx.editMessageText(confirmText, { reply_markup: keyboard });
+    } catch (e) {
+      await ctx.reply(confirmText, { reply_markup: keyboard });
+    }
+    await ctx.answerCallbackQuery();
+  });
+
+  bot.callbackQuery(/^confirm_gift_(.+)$/, async (ctx) => {
+    const planId = ctx.match[1] as PlanId;
+    const plan = PLANS[planId];
+    if (!plan) {
+      await ctx.answerCallbackQuery('Неизвестный тариф');
+      return;
+    }
+
+    const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
+    if (!providerToken) {
+      await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
+      console.error('PAYMENT_PROVIDER_TOKEN is missing');
+      return;
+    }
+
+    const gift = await prisma.giftSubscription.create({
+      data: {
+        status: 'created',
+        planId,
+        days: plan.days,
+        amount: plan.amount,
+        currency: 'RUB',
+        createdByUserId: ctx.dbUser!.id,
+      },
+    });
+
+    await ctx.answerCallbackQuery();
+
+    try {
+      await sendInvoiceWithReceipt(
+        bot,
+        ctx.chat!.id,
+        providerToken,
+        `Подарок: ${plan.title}`,
+        `Подарочная подписка на ${plan.duration}`,
+        `gift:${gift.token}`,
+        plan.amount
+      );
+    } catch (error) {
+      console.error('Error sending gift invoice:', error);
+      await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', {
+        reply_markup: getBackToMenuKeyboard(),
+      });
+    }
+  });
+
   // Обработчик PreCheckoutQuery (обязательно для Telegram Payments)
   bot.on('pre_checkout_query', async (ctx) => {
       // Здесь можно добавить проверки (например, актуальность цены)
@@ -218,7 +292,41 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
   // Обработчик успешного платежа
   bot.on('message:successful_payment', async (ctx) => {
       const payment = ctx.message.successful_payment;
-      const planId = payment.invoice_payload as PlanId;
+      const payload = payment.invoice_payload;
+
+      // Gift purchase flow
+      if (payload.startsWith('gift:')) {
+        const token = payload.slice('gift:'.length);
+        const gift = await prisma.giftSubscription.findUnique({ where: { token } });
+        if (!gift) {
+          console.error('Gift not found for token:', token);
+          return;
+        }
+
+        if (gift.status !== 'created') {
+          // уже обработан
+          return;
+        }
+
+        await prisma.giftSubscription.update({
+          where: { token },
+          data: { status: 'paid', paidAt: new Date() },
+        });
+
+        const botUsername = process.env.BOT_USERNAME;
+        const link = botUsername ? `https://t.me/${botUsername}?start=gift_${token}` : undefined;
+
+        await ctx.reply(
+          `🎁 Подарок оплачен!\n\n` +
+            (link
+              ? `Отправь другу эту ссылку:\n${link}\n\nОна одноразовая — после активации перестанет работать.`
+              : `Отправь другу команду:\n/start gift_${token}\n\n(Чтобы ссылка работала как URL — добавь BOT_USERNAME в env.)`),
+          { reply_markup: getMainMenuKeyboard() }
+        );
+        return;
+      }
+
+      const planId = payload as PlanId;
       const plan = PLANS[planId];
       
       if (!plan) {

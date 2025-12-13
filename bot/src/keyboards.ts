@@ -4,9 +4,18 @@ import { InlineKeyboard } from 'grammy';
 export function getMainMenuKeyboard() {
   return new InlineKeyboard()
     .text('📢 Канал', 'menu_channel').text('⚙️ Настройки', 'menu_settings').row()
-    .text('💎 Подписка', 'menu_subscription').text('🆘 Техподдержка', 'menu_support').row()
+    .text('💎 Подписка', 'menu_subscription').text('🎁 Подарить подписку', 'menu_gift').row()
+    .text('🆘 Техподдержка', 'menu_support').row()
     .text('📔 Дневник наблюдений', 'menu_diary').row()
     .text('🧠 Обсудить', 'menu_discuss');
+}
+
+export function getGiftPlansKeyboard() {
+  return new InlineKeyboard()
+    .text('🎁 1 неделя (159₽)', 'gift_plan_sub_plan_week').row()
+    .text('🎁 1 месяц (399₽)', 'gift_plan_sub_plan_month').row()
+    .text('🎁 80 дней (999₽)', 'gift_plan_sub_plan_80days').row()
+    .text('🚪 Выйти', 'menu_main');
 }
 
 // Меню подписки (Inline)

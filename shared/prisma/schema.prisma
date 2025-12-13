@@ -33,6 +33,8 @@ model User {
   introductionData   IntroductionData?
   payments           Payment[]
   weeklyAnalytics    WeeklyAnalytics[]
+  giftSubscriptionsCreated GiftSubscription[] @relation("GiftCreator")
+  giftSubscriptionsRedeemed GiftSubscription[] @relation("GiftRedeemer")
   
   @@map("users")
 }
@@ -52,6 +54,29 @@ model WeeklyAnalytics {
   @@unique([userId, weekNumber])
   @@index([userId, createdAt])
   @@map("weekly_analytics")
+}
+
+model GiftSubscription {
+  id            Int      @id @default(autoincrement())
+  token         String   @unique @default(cuid())
+  status        String   @default("created") // created | paid | redeemed | cancelled
+  planId        String
+  days          Int
+  amount        Int      // копейки
+  currency      String   @default("RUB")
+  createdAt     DateTime @default(now())
+  paidAt        DateTime?
+  redeemedAt    DateTime?
+  // Кто купил
+  createdByUserId Int
+  createdBy      User     @relation("GiftCreator", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  // Кто активировал (становится известен при редиме)
+  redeemedByUserId Int?
+  redeemedBy      User?    @relation("GiftRedeemer", fields: [redeemedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdByUserId, createdAt])
+  @@index([redeemedByUserId, redeemedAt])
+  @@map("gift_subscriptions")
 }
 
 model Subscription {

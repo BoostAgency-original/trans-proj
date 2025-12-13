@@ -1,6 +1,6 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getBackToMenuKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getBackToMenuKeyboard, getGiftPlansKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 import { showDiaryList } from './diary';
 import { requireAccess } from '../services/access';
@@ -72,6 +72,17 @@ export function setupMenuHandlers(bot: Bot<BotContext>) {
     text = text.replace('{support_bot}', supportBot);
 
     await ctx.reply(text, { reply_markup: getBackToMenuKeyboard() });
+    await ctx.answerCallbackQuery();
+  });
+
+  // Кнопка "Подарить подписку"
+  bot.callbackQuery('menu_gift', async (ctx) => {
+    const text = '🎁 Подарить подписку\n\nВыберите тариф. После оплаты бот выдаст ссылку, которую можно переслать другу.';
+    try {
+      await ctx.editMessageText(text, { reply_markup: getGiftPlansKeyboard() });
+    } catch (e) {
+      await ctx.reply(text, { reply_markup: getGiftPlansKeyboard() });
+    }
     await ctx.answerCallbackQuery();
   });
 

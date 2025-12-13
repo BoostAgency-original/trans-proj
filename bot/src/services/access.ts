@@ -10,7 +10,14 @@ import { getSubscriptionKeyboard } from '../keyboards';
 export function hasActiveAccess(ctx: BotContext): boolean {
     const user = ctx.dbUser;
     if (!user || !user.subscription) return false;
-    return user.subscription.isActive;
+    const sub = user.subscription;
+    if (!sub.isActive) return false;
+    // Если это платная подписка — она активна только пока expiresAt > now
+    if (sub.expiresAt) {
+      return sub.expiresAt > new Date();
+    }
+    // Иначе (trial) isActive=true, а деактивацию выполняем после окончания триала
+    return true;
 }
 
 /**

@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getPostIntroOfferKeyboard } from '../keyboards';
+import { getPostIntroOfferKeyboard, getMorningKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 
 const prisma = new PrismaClient();
@@ -134,16 +134,20 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
         return;
     }
 
-    // Завершаем вводный сценарий, но НЕ запускаем практику (ни триал, ни принципы),
-    // пока пользователь явно не выберет: купить по акции или начать триал.
+    // Если у пользователя уже есть оплаченная подписка (в том числе подаренная),
+    // то после интро мы НЕ показываем промо-оффер — сразу стартуем практику и шлём 1-й принцип.
+    const now = new Date();
+    const sub = ctx.dbUser?.subscription;
+    const hasPaid = !!(sub?.isActive && sub.expiresAt && sub.expiresAt > now);
+
     await prisma.user.update({
       where: { id: ctx.dbUser!.id },
-      data: { 
+      data: {
         isIntroCompleted: true,
-        introCompletedAt: null,
-        currentPrincipleDay: 1,
-        lastPrincipleSentAt: null
-      }
+        introCompletedAt: hasPaid ? now : null,
+        currentPrincipleDay: hasPaid ? 2 : 1,
+        lastPrincipleSentAt: hasPaid ? now : null,
+      } as any,
     });
 
     ctx.session.step = undefined;
@@ -151,11 +155,28 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
     } catch (e) {}
 
-    const offerText = await getMessage('post_intro_offer', DEFAULT_POST_INTRO_OFFER);
-    await ctx.reply(offerText, {
-      parse_mode: 'HTML',
-      reply_markup: getPostIntroOfferKeyboard()
-    });
+    if (hasPaid) {
+      const principle = await prisma.transurfingPrinciple.findUnique({ where: { dayNumber: 1 } });
+      if (principle) {
+        const name = ctx.dbUser?.name || ctx.dbUser?.firstName || 'друг';
+        const message =
+          `${name}, поздравляю! Ты начал свой путь.\n\n` +
+          `<b>День 1. Принцип: ${principle.title}</b>\n\n` +
+          `<b>Декларация:</b>\n\n<blockquote>${principle.declaration}</blockquote>\n\n` +
+          `<b>Пояснение:</b>\n${principle.description}\n\n` +
+          `<b>Сегодня наблюдай:</b>\n\n${principle.task}`;
+
+        await ctx.reply(message, { reply_markup: getMorningKeyboard(), parse_mode: 'HTML' });
+      } else {
+        await ctx.reply('Принцип не найден. Попробуйте позже.');
+      }
+    } else {
+      const offerText = await getMessage('post_intro_offer', DEFAULT_POST_INTRO_OFFER);
+      await ctx.reply(offerText, {
+        parse_mode: 'HTML',
+        reply_markup: getPostIntroOfferKeyboard(),
+      });
+    }
     
     await ctx.answerCallbackQuery();
   });
