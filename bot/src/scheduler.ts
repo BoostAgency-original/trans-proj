@@ -7,6 +7,16 @@ const prisma = new PrismaClient();
 
 const TRIAL_DAYS = 7; // триал = первые 7 принципов/дней
 
+function getLocalDateKey(date: Date, timezone: string): string {
+  // YYYY-MM-DD в локальной дате пользователя
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+}
+
 // Функция для получения текущего времени в формате HH:mm в определенной timezone
 function getCurrentTimeInTimezone(timezone: string): string {
   try {
@@ -96,6 +106,16 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
       }
 
       if (isRegularTime || isReminderTime) {
+        // Ограничение: не отправляем 2 разных принципа в один календарный день пользователя.
+        // Напоминание (remind later) допускаем — это повтор того же принципа.
+        if (isRegularTime && user.lastPrincipleSentAt) {
+          const lastKey = getLocalDateKey(new Date(user.lastPrincipleSentAt), user.timezone);
+          const nowKey = getLocalDateKey(now, user.timezone);
+          if (lastKey === nowKey) {
+            continue;
+          }
+        }
+
         // При напоминании отправляем тот же принцип (currentPrincipleDay - 1),
         // так как счётчик уже был инкрементирован после первой отправки
         let dayNumber = isReminderTime ? user.currentPrincipleDay - 1 : user.currentPrincipleDay;
@@ -203,7 +223,7 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
             
             await prisma.user.update({
               where: { id: user.id },
-              data: { currentPrincipleDay: nextDay }
+              data: { currentPrincipleDay: nextDay, lastPrincipleSentAt: now }
             });
             
             // Обновляем trialDaysUsed (сколько триальных принципов получил, макс 7)

@@ -177,6 +177,12 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
             reply_markup: getMorningKeyboard(),
             parse_mode: 'HTML'
         });
+
+        // Фиксируем, что принцип уже отправлен сегодня (чтобы утром не прилетел второй в тот же день)
+        await prisma.user.update({
+          where: { id: ctx.dbUser!.id },
+          data: { lastPrincipleSentAt: new Date() }
+        });
     } else {
         // Fallback если принципа нет
         const text = await getMessage('intro_finish', DEFAULT_TEXTS.finish);
