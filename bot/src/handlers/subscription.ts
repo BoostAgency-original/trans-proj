@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 
 const prisma = new PrismaClient();
@@ -32,6 +32,65 @@ const PLANS = {
 } as const;
 
 type PlanId = keyof typeof PLANS;
+
+async function sendInvoiceWithReceipt(
+  bot: Bot<BotContext>,
+  chatId: number,
+  providerToken: string,
+  title: string,
+  description: string,
+  payload: string,
+  amountKopecks: number
+) {
+  const providerData = JSON.stringify({
+    receipt: {
+      items: [
+        {
+          description: title,
+          quantity: 1,
+          amount: {
+            value: (amountKopecks / 100).toFixed(2),
+            currency: 'RUB',
+          },
+          vat_code: 1,
+          payment_mode: 'full_payment',
+          payment_subject: 'service',
+        },
+      ],
+      tax_system_code: 2,
+    },
+  });
+
+  await bot.api.sendInvoice(
+    chatId,
+    title,
+    description,
+    payload,
+    'RUB',
+    [{ label: title, amount: amountKopecks }],
+    {
+      provider_token: providerToken,
+      need_email: true,
+      send_email_to_provider: true,
+      provider_data: providerData,
+    }
+  );
+}
+
+async function sendFirstPrinciple(ctx: BotContext) {
+  const principle = await prisma.transurfingPrinciple.findUnique({ where: { dayNumber: 1 } });
+  if (!principle) return;
+
+  const name = ctx.dbUser?.name || ctx.dbUser?.firstName || 'друг';
+  const message =
+    `${name}, поздравляю! Ты начал свой путь.\n\n` +
+    `<b>День 1. Принцип: ${principle.title}</b>\n\n` +
+    `<b>Декларация:</b>\n\n<blockquote>${principle.declaration}</blockquote>\n\n` +
+    `<b>Пояснение:</b>\n${principle.description}\n\n` +
+    `<b>Сегодня наблюдай:</b>\n\n${principle.task}`;
+
+  await ctx.reply(message, { reply_markup: getMorningKeyboard(), parse_mode: 'HTML' });
+}
 
 export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
   
@@ -86,42 +145,16 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       
       console.log(`Sending invoice: ${plan.title} for ${plan.amount} kopecks`);
 
-      // Данные для чека (фискализация ЮKassa)
-      // amount.value в рублях, vat_code=1 (без НДС), tax_system_code=2 (УСН доход)
-      const providerData = JSON.stringify({
-          receipt: {
-              items: [
-                  {
-                      description: plan.title,
-                      quantity: 1,
-                      amount: {
-                          value: (plan.amount / 100).toFixed(2), // в рублях
-                          currency: 'RUB'
-                      },
-                      vat_code: 1, // без НДС
-                      payment_mode: 'full_payment',
-                      payment_subject: 'service' // услуга
-                  }
-              ],
-              tax_system_code: 2 // УСН доход
-          }
-      });
-
       // Отправляем инвойс через Telegram Payments API (ЮКасса)
       try {
-          await bot.api.sendInvoice(
-              ctx.chat!.id,
-              plan.title,
-              plan.description,
-              planId, // payload - для идентификации после оплаты
-              'RUB',
-              [{ label: plan.title, amount: plan.amount }],
-              {
-                  provider_token: providerToken,
-                  need_email: true, // запрашиваем email для чека
-                  send_email_to_provider: true, // отправляем email в ЮKassa
-                  provider_data: providerData // данные для чека
-              }
+          await sendInvoiceWithReceipt(
+            bot,
+            ctx.chat!.id,
+            providerToken,
+            plan.title,
+            plan.description,
+            planId,
+            plan.amount
           );
       } catch (error) {
           console.error('Error sending invoice:', error);
@@ -129,6 +162,50 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
               reply_markup: getBackToMenuKeyboard()
           });
       }
+  });
+
+  // Промо-оплата до старта триала (скидка только тут)
+  bot.callbackQuery(['promo_buy_month_299', 'promo_buy_80days_799'], async (ctx) => {
+    const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
+    if (!providerToken) {
+      await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
+      console.error('PAYMENT_PROVIDER_TOKEN is missing');
+      return;
+    }
+
+    const user = ctx.dbUser!;
+    // Скидка доступна только до старта практики (introCompletedAt == null)
+    if (user.introCompletedAt) {
+      await ctx.answerCallbackQuery('Акция доступна только до старта пробного периода');
+      return;
+    }
+
+    const isMonth = ctx.callbackQuery.data === 'promo_buy_month_299';
+    const planId: PlanId = isMonth ? 'sub_plan_month' : 'sub_plan_80days';
+    const plan = PLANS[planId];
+    const promoAmount = isMonth ? 29900 : 79900;
+    const title = isMonth ? `${plan.title} (акция)` : `${plan.title} (акция)`;
+    const description = isMonth
+      ? 'Скидка доступна до старта пробного периода'
+      : 'Скидка доступна до старта пробного периода';
+
+    await ctx.answerCallbackQuery();
+    try {
+      await sendInvoiceWithReceipt(
+        bot,
+        ctx.chat!.id,
+        providerToken,
+        title,
+        description,
+        planId, // payload оставляем обычным, скидка действует только в этом сценарии
+        promoAmount
+      );
+    } catch (error) {
+      console.error('Error sending promo invoice:', error);
+      await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', {
+        reply_markup: getBackToMenuKeyboard(),
+      });
+    }
   });
   
   // Обработчик PreCheckoutQuery (обязательно для Telegram Payments)
@@ -179,6 +256,20 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
           `Спасибо, что вы с нами!`,
           { reply_markup: getMainMenuKeyboard() }
       );
+
+      // Если пользователь купил подписку ДО старта триала — запускаем практику и отправляем 1-й принцип
+      if (user.isIntroCompleted && !user.introCompletedAt) {
+        const now = new Date();
+        await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            introCompletedAt: now,
+            currentPrincipleDay: 2,
+            lastPrincipleSentAt: now,
+          },
+        });
+        await sendFirstPrinciple(ctx);
+      }
   });
 
   // Обработка "Напомнить позже" (из триала) - напоминание через 2 дня

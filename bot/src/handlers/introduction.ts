@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getMorningKeyboard } from '../keyboards';
+import { getPostIntroOfferKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 
 const prisma = new PrismaClient();
@@ -24,6 +24,12 @@ const DEFAULT_TEXTS = {
   step6: 'Ты меняешься не в тот момент, когда читаешь. А в тот момент, когда замечаешь.\n\nГотов начать?',
   finish: '🎉 Поздравляю! Ты прошел вводную часть.\n\nТеперь тебе доступно главное меню и все функции бота.'
 };
+
+const DEFAULT_POST_INTRO_OFFER = `Ты прошёл вводный сценарий.\n\n` +
+  `До старта пробного периода у тебя есть предложение со скидкой:\n` +
+  `- 1 месяц: <b>299₽</b> вместо 399₽\n` +
+  `- 80 дней: <b>799₽</b> вместо 999₽\n\n` +
+  `Если хочешь — можешь начать бесплатный период.`;
 
 export function setupIntroductionHandlers(bot: Bot<BotContext>) {
   // Шаг 1: Кнопка "Готов"
@@ -128,31 +134,16 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
         return;
     }
 
-    // Завершаем сценарий и активируем триал
+    // Завершаем вводный сценарий, но НЕ запускаем практику (ни триал, ни принципы),
+    // пока пользователь явно не выберет: купить по акции или начать триал.
     await prisma.user.update({
       where: { id: ctx.dbUser!.id },
       data: { 
         isIntroCompleted: true,
-        introCompletedAt: new Date(), // Фиксируем время завершения интро
-        currentPrincipleDay: 2 // Первый принцип отправляем сейчас, следующий будет 2-й
+        introCompletedAt: null,
+        currentPrincipleDay: 1,
+        lastPrincipleSentAt: null
       }
-    });
-
-    // Создаем или обновляем подписку (активируем триал)
-    // trialDaysUsed = 1, так как первый принцип отправляется сразу после интро
-    await prisma.subscription.upsert({
-        where: { userId: ctx.dbUser!.id },
-        update: {
-            isActive: true,
-            activatedAt: new Date(),
-            trialDaysUsed: 1,
-        },
-        create: {
-            userId: ctx.dbUser!.id,
-            isActive: true,
-            activatedAt: new Date(),
-            trialDaysUsed: 1,
-        }
     });
 
     ctx.session.step = undefined;
@@ -160,36 +151,11 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
       await ctx.editMessageReplyMarkup({ reply_markup: undefined });
     } catch (e) {}
 
-    // Отправляем первый принцип немедленно (без "Доброе утро")
-    const principle = await prisma.transurfingPrinciple.findUnique({
-      where: { dayNumber: 1 }
+    const offerText = await getMessage('post_intro_offer', DEFAULT_POST_INTRO_OFFER);
+    await ctx.reply(offerText, {
+      parse_mode: 'HTML',
+      reply_markup: getPostIntroOfferKeyboard()
     });
-
-    if (principle) {
-        const name = ctx.dbUser?.name || ctx.dbUser?.firstName || 'друг';
-        const message = `${name}, поздравляю! Ты начал свой путь.\n\n` +
-          `<b>День 1. Принцип: ${principle.title}</b>\n\n` +
-          `<b>Декларация:</b>\n\n<blockquote>${principle.declaration}</blockquote>\n\n` +
-          `<b>Пояснение:</b>\n${principle.description}\n\n` +
-          `<b>Сегодня наблюдай:</b>\n\n${principle.task}`;
-
-        await ctx.reply(message, {
-            reply_markup: getMorningKeyboard(),
-            parse_mode: 'HTML'
-        });
-
-        // Фиксируем, что принцип уже отправлен сегодня (чтобы утром не прилетел второй в тот же день)
-        await prisma.user.update({
-          where: { id: ctx.dbUser!.id },
-          data: { lastPrincipleSentAt: new Date() }
-        });
-    } else {
-        // Fallback если принципа нет
-        const text = await getMessage('intro_finish', DEFAULT_TEXTS.finish);
-        await ctx.reply(text, {
-            reply_markup: getMainMenuKeyboard()
-        });
-    }
     
     await ctx.answerCallbackQuery();
   });

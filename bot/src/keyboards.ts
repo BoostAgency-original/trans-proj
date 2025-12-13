@@ -66,6 +66,14 @@ export function getWeeklyAnalyticsKeyboard(weekNumber: number) {
     .text('⏭ Пропустить', `skip_weekly_${weekNumber}`);
 }
 
+// Оффер после интро (до старта триала)
+export function getPostIntroOfferKeyboard() {
+  return new InlineKeyboard()
+    .text('💎 1 месяц — 299₽', 'promo_buy_month_299').row()
+    .text('💎 80 дней — 799₽', 'promo_buy_80days_799').row()
+    .text('🚀 Начать бесплатный период', 'start_trial');
+}
+
 // Навигация по дневнику
 export function getDiaryNavigationKeyboard(hasNext: boolean) {
   const keyboard = new InlineKeyboard();

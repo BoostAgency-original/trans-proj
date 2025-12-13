@@ -5,6 +5,7 @@ import type { BotContext } from '../types';
 import { getBackToMenuKeyboard, getMainMenuKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 import { requireAccess } from '../services/access';
+import { getMorningKeyboard } from '../keyboards';
 
 const prisma = new PrismaClient();
 
@@ -14,6 +15,69 @@ const openai = new OpenAI({
 });
 
 export function setupActionHandlers(bot: Bot<BotContext>) {
+  // Старт бесплатного пробного периода (из оффера после интро)
+  bot.callbackQuery('start_trial', async (ctx) => {
+    const user = ctx.dbUser!;
+
+    // Если практика уже стартовала — ничего не делаем
+    if (user.introCompletedAt) {
+      await ctx.answerCallbackQuery('Пробный период уже запущен');
+      return;
+    }
+
+    const now = new Date();
+
+    // Активируем практику
+    await prisma.user.update({
+      where: { id: user.id },
+      // cast: поле есть в схеме, но IDE/тип-сервис иногда отстаёт от prisma generate
+      data: {
+        introCompletedAt: now,
+        currentPrincipleDay: 2,
+        lastPrincipleSentAt: now,
+      } as any,
+    });
+
+    // Активируем триал
+    await prisma.subscription.upsert({
+      where: { userId: user.id },
+      update: {
+        isActive: true,
+        activatedAt: now,
+        expiresAt: null,
+        trialDaysUsed: 1,
+      },
+      create: {
+        userId: user.id,
+        isActive: true,
+        activatedAt: now,
+        expiresAt: null,
+        trialDaysUsed: 1,
+      },
+    });
+
+    // Отправляем первый принцип
+    const principle = await prisma.transurfingPrinciple.findUnique({ where: { dayNumber: 1 } });
+    if (principle) {
+      const name = user.name || user.firstName || 'друг';
+      const message =
+        `${name}, поздравляю! Ты начал свой путь.\n\n` +
+        `<b>День 1. Принцип: ${principle.title}</b>\n\n` +
+        `<b>Декларация:</b>\n\n<blockquote>${principle.declaration}</blockquote>\n\n` +
+        `<b>Пояснение:</b>\n${principle.description}\n\n` +
+        `<b>Сегодня наблюдай:</b>\n\n${principle.task}`;
+
+      await ctx.reply(message, { reply_markup: getMorningKeyboard(), parse_mode: 'HTML' });
+    } else {
+      await ctx.reply('Принцип не найден. Попробуйте позже.');
+    }
+
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch (e) {}
+
+    await ctx.answerCallbackQuery();
+  });
   // 1. Записать в дневник (из утреннего сообщения)
   bot.callbackQuery('diary_add_auto', async (ctx) => {
     if (!await requireAccess(ctx)) {
