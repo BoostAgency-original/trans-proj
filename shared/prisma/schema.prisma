@@ -32,8 +32,26 @@ model User {
   diaryEntries       DiaryEntry[]
   introductionData   IntroductionData?
   payments           Payment[]
+  weeklyAnalytics    WeeklyAnalytics[]
   
   @@map("users")
+}
+
+model WeeklyAnalytics {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekNumber    Int      // Номер недели (1,2,3...) по циклам 7 дней
+  dayNumber     Int      // Какой это день для пользователя в боте на момент аналитики
+  notesDays     Int      // В скольких днях из 7 были заметки
+  notesCount    Int      // Всего заметок за период
+  period        Json     // Метаданные периода (например { startDay, endDay, principles: [...] })
+  text          String   @db.Text
+  createdAt     DateTime @default(now())
+
+  @@unique([userId, weekNumber])
+  @@index([userId, createdAt])
+  @@map("weekly_analytics")
 }
 
 model Subscription {

@@ -141,6 +141,50 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
     await ctx.answerCallbackQuery();
   });
 
+  // 3.2 Обсудить недельную аналитику с AI
+  bot.callbackQuery(/^ai_discuss_weekly_(\d+)$/, async (ctx) => {
+    if (!await requireAccess(ctx)) {
+      await ctx.answerCallbackQuery();
+      return;
+    }
+
+    const weekNumber = parseInt(ctx.match[1], 10);
+    const userId = ctx.dbUser!.id;
+
+    // bracket-lookup: чтобы IDE/TS-сервис точно видел модель после prisma generate
+    const analytics = await (prisma as any).weeklyAnalytics.findUnique({
+      where: { userId_weekNumber: { userId, weekNumber } },
+    });
+
+    if (!analytics) {
+      await ctx.answerCallbackQuery('Аналитика не найдена');
+      return;
+    }
+
+    ctx.session.step = 'chatting_with_ai';
+    ctx.session.data.aiContext = 'weekly_analytics';
+    ctx.session.data.weeklyAnalytics = analytics;
+
+    const keyboard = new InlineKeyboard().text('❌ Закончить обсуждение', 'stop_ai_chat');
+
+    await ctx.reply(
+      `🧠 Режим обсуждения аналитики включен.\n\n` +
+        `Неделя ${analytics.weekNumber}, День ${analytics.dayNumber}.\n` +
+        `Что хочешь уточнить или разобрать?`,
+      { reply_markup: keyboard }
+    );
+
+    await ctx.answerCallbackQuery();
+  });
+
+  // 4.2 Пропустить недельную аналитику
+  bot.callbackQuery(/^skip_weekly_(\d+)$/, async (ctx) => {
+    try {
+      await ctx.editMessageReplyMarkup({ reply_markup: undefined });
+    } catch (e) {}
+    await ctx.answerCallbackQuery('Ок, пропускаем');
+  });
+
   // 4. Пропустить день
   bot.callbackQuery('skip_day', async (ctx) => {
       // Увеличиваем счетчик пропусков
@@ -311,6 +355,16 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
                     `- Спокойное намерение вместо “хочу любой ценой”\n` +
                     `- Снижение важности (отпустить хватку)\n` +
                     `- Работу с маятниками (не бороться, не давать энергию)`;
+            }
+
+            if (context === 'weekly_analytics') {
+                const analytics = ctx.session.data.weeklyAnalytics;
+                const analyticsText = analytics?.text || '';
+                systemPrompt = baseInstructions +
+                    `\nКОНТЕКСТ: Пользователь обсуждает недельную аналитику.\n` +
+                    `Данные:\nНеделя: ${analytics?.weekNumber ?? '?'}\nДень: ${analytics?.dayNumber ?? '?'}\nЗаметки: ${analytics?.notesDays ?? '?'}/7 дней\n\n` +
+                    `Текст аналитики:\n${analyticsText}\n\n` +
+                    `ЗАДАЧА: Объясняй выводы, помогай уточнять детали, давай 1-2 конкретных шага.`;
             }
 
             const completion = await openai.chat.completions.create({

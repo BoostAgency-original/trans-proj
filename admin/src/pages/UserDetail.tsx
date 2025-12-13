@@ -22,6 +22,15 @@ interface User {
     expiresAt?: string;
     trialDaysUsed: number;
   };
+  weeklyAnalytics?: Array<{
+    id: number;
+    weekNumber: number;
+    dayNumber: number;
+    notesDays: number;
+    notesCount: number;
+    text: string;
+    createdAt: string;
+  }>;
   diaryEntries: Array<{
     id: number;
     dayNumber: number; // Используем dayNumber вместо principle
@@ -275,6 +284,28 @@ const UserDetail = () => {
           </div>
         ) : (
           <p>Пока нет записей в дневнике</p>
+        )}
+      </div>
+
+      <div className="detail-card">
+        <h2>Недельная аналитика ({user.weeklyAnalytics?.length || 0})</h2>
+        {user.weeklyAnalytics && user.weeklyAnalytics.length > 0 ? (
+          <div className="diary-list">
+            {user.weeklyAnalytics.map((a) => (
+              <div key={a.id} className="diary-entry">
+                <div className="diary-header">
+                  <span className="principle-badge">Неделя {a.weekNumber} • День {a.dayNumber}</span>
+                  <span className="diary-date">{new Date(a.createdAt).toLocaleString('ru-RU')}</span>
+                </div>
+                <p className="diary-note">
+                  <b>Заметки:</b> {a.notesDays}/7 дней (всего {a.notesCount})
+                </p>
+                <p className="diary-note" style={{ whiteSpace: 'pre-wrap' }}>{a.text}</p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p>Пока нет аналитики</p>
         )}
       </div>
     </div>

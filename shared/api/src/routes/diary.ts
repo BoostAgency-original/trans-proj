@@ -12,7 +12,7 @@ router.get('/', async (req, res) => {
     const entries = await prisma.diaryEntry.findMany({
       where: {
         userId: userId ? parseInt(userId as string) : undefined,
-        principle: principle ? parseInt(principle as string) : undefined
+        dayNumber: principle ? parseInt(principle as string) : undefined
       },
       include: {
         user: {

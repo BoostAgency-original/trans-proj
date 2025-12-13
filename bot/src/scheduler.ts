@@ -1,11 +1,17 @@
 import { Bot } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from './types';
-import { getMorningKeyboard, getEveningKeyboard, getTrialExpiredKeyboard, getSubscriptionKeyboard } from './keyboards';
+import { getMorningKeyboard, getEveningKeyboard, getTrialExpiredKeyboard, getSubscriptionKeyboard, getWeeklyAnalyticsKeyboard } from './keyboards';
+import OpenAI from 'openai';
 
 const prisma = new PrismaClient();
 
 const TRIAL_DAYS = 7; // триал = первые 7 принципов/дней
+
+const openai = new OpenAI({
+  baseURL: 'https://openrouter.ai/api/v1',
+  apiKey: process.env.OPENROUTER_API_KEY,
+});
 
 function getLocalDateKey(date: Date, timezone: string): string {
   // YYYY-MM-DD в локальной дате пользователя
@@ -285,24 +291,155 @@ async function sendEveningMessages(bot: Bot<BotContext>) {
            continue;
         }
         
+        // Недельная аналитика: каждый 7-й день вместо вечернего сообщения
+        const currentDayNumber = Math.max(1, user.currentPrincipleDay - 1);
+        const isWeeklyDay = currentDayNumber % 7 === 0;
+        const weekNumber = Math.floor((currentDayNumber - 1) / 7) + 1;
+
+        if (isWeeklyDay) {
+          const existing = await prisma.weeklyAnalytics.findUnique({
+            where: { userId_weekNumber: { userId: user.id, weekNumber } },
+          });
+
+          if (!existing) {
+            try {
+              const startDay = Math.max(1, currentDayNumber - 6);
+              const endDay = currentDayNumber;
+
+              const dayNumbers = Array.from({ length: endDay - startDay + 1 }, (_, i) => startDay + i);
+
+              const entries = await prisma.diaryEntry.findMany({
+                where: {
+                  userId: user.id,
+                  dayNumber: { in: dayNumbers },
+                },
+                orderBy: { createdAt: 'asc' },
+              });
+
+              const notesDays = new Set(entries.map((e) => e.dayNumber)).size;
+              const notesCount = entries.length;
+
+              const principles = await prisma.transurfingPrinciple.findMany({
+                where: { dayNumber: { in: dayNumbers } },
+                select: { dayNumber: true, title: true, declaration: true, description: true },
+                orderBy: { dayNumber: 'asc' },
+              });
+
+              const prev = await prisma.weeklyAnalytics.findFirst({
+                where: { userId: user.id },
+                orderBy: { createdAt: 'desc' },
+              });
+
+              const name = user.name || user.firstName || 'друг';
+
+              const systemPrompt = `
+Ты — мастер Трансерфинга реальности (Вадим Зеланд). НЕ психолог и НЕ коуч.
+Говори как практик: кратко, ясно, с метафорами (зеркало мира, маятники, течение вариантов), без морализаторства.
+Не называй техники их терминами без необходимости — объясняй простыми словами.
+
+ЗАДАЧА:
+Сделай недельную аналитику по заметкам пользователя (7 дней).
+1) Покажи, как менялись мысли/реакции и куда “утекала энергия”.
+2) Отметь, где была лишняя важность/напряжение и что можно отпустить.
+3) Дай 2–3 конкретных микро-практики на следующую неделю.
+4) Стиль: трансёрфинг, не психология.
+Формат: 6–10 коротких пунктов + финальная 1 строка-намерение.
+`;
+
+              let userPrompt = `Пользователь: ${name}\nНеделя #${weekNumber}. День в боте: ${currentDayNumber}\nЗаметки сделаны в ${notesDays} из 7 дней. Всего заметок: ${notesCount}\n\n`;
+
+              if (entries.length > 0) {
+                userPrompt += `ЗАМЕТКИ (по дням):\n`;
+                for (const e of entries) {
+                  userPrompt += `День ${e.dayNumber} [${e.type}]: ${e.note}\n`;
+                }
+                userPrompt += `\nПринципы недели:\n${principles.map(p => `День ${p.dayNumber}: ${p.title}`).join('\n')}\n`;
+                if (prev) {
+                  userPrompt += `\nПРЕДЫДУЩАЯ АНАЛИТИКА (для сравнения динамики):\n${prev.text}\n`;
+                }
+              } else {
+                userPrompt += `Заметок за эту неделю нет.\n\nПринципы недели:\n`;
+                for (const p of principles) {
+                  userPrompt += `День ${p.dayNumber}: ${p.title}\n`;
+                }
+                userPrompt += `\nСформируй мотивирующее сообщение, мягко предложи начать делать короткие заметки, задай 3 вопроса за неделю по этим принципам.\n`;
+              }
+
+              let analysisText = '';
+              if (!process.env.OPENROUTER_API_KEY) {
+                analysisText =
+                  `Я пока не могу сформировать аналитику (не настроен ключ нейросети).\n\n` +
+                  `Но я вижу факт: заметки за неделю — ${notesDays}/7 дней.\n` +
+                  `Давай начнем с малого: 2–3 строки вечером — и ты сам увидишь динамику.`;
+              } else {
+                const completion = await openai.chat.completions.create({
+                  model: 'openai/gpt-4o-mini',
+                  messages: [
+                    { role: 'system', content: systemPrompt.trim() },
+                    { role: 'user', content: userPrompt.trim() },
+                  ],
+                });
+
+                analysisText =
+                  completion.choices[0].message.content?.trim() ||
+                  'Я не смог сформулировать аналитику. Попробуй еще раз завтра.';
+              }
+
+              const saved = await prisma.weeklyAnalytics.create({
+                data: {
+                  userId: user.id,
+                  weekNumber,
+                  dayNumber: currentDayNumber,
+                  notesDays,
+                  notesCount,
+                  period: { startDay, endDay, principles: principles.map((p) => ({ dayNumber: p.dayNumber, title: p.title })) },
+                  text: analysisText,
+                },
+              });
+
+              const header =
+                `📊 <b>Недельная аналитика</b>\n<b>Неделя ${weekNumber}</b> • <b>День ${currentDayNumber}</b>\n\n` +
+                `Заметки: <b>${notesDays}/7</b> дней\n\n`;
+
+              await bot.api.sendMessage(user.telegramId.toString(), header + analysisText, {
+                parse_mode: 'HTML',
+                reply_markup: getWeeklyAnalyticsKeyboard(saved.weekNumber),
+              });
+
+              console.log(`✅ Sent weekly analytics to user ${user.id} (week ${weekNumber})`);
+
+              if (isReminderTime) {
+                await prisma.user.update({
+                  where: { id: user.id },
+                  data: { nextEveningMessageAt: null },
+                });
+              }
+
+              continue;
+            } catch (e) {
+              console.error(`❌ Weekly analytics failed for user ${user.id} (week ${weekNumber}):`, e);
+              // Падаем обратно на обычное вечернее сообщение ниже
+            }
+          }
+        }
+
+        // Обычное вечернее сообщение
         let messageText = await getBotMessage('evening_reflection');
         if (!messageText) messageText = 'Как прошел твой день?';
 
-        // Подставляем имя
         const name = user.name || user.firstName || 'друг';
         messageText = messageText.replace('{name}', name);
 
         try {
           await bot.api.sendMessage(user.telegramId.toString(), messageText, {
-              reply_markup: getEveningKeyboard()
+            reply_markup: getEveningKeyboard(),
           });
           console.log(`✅ Sent evening message to user ${user.id}${isReminderTime ? ' (reminder)' : ''}`);
-          
-          // Сбрасываем напоминание, если сработало
+
           if (isReminderTime) {
             await prisma.user.update({
               where: { id: user.id },
-              data: { nextEveningMessageAt: null }
+              data: { nextEveningMessageAt: null },
             });
           }
         } catch (error) {

@@ -7,7 +7,8 @@ export interface SessionData {
       currentPrinciple?: any;
       currentDiaryDay?: number;
       diaryType?: 'morning' | 'evening';
-      aiContext?: 'principle' | 'day' | 'diary_entry';
+      aiContext?: 'principle' | 'day' | 'diary_entry' | 'weekly_analytics';
+      weeklyAnalytics?: any;
       [key: string]: any;
   };
 }

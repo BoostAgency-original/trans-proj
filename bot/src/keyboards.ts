@@ -58,6 +58,14 @@ export function getEveningKeyboard() {
     .text('⏭ Пропустить день', 'skip_day');
 }
 
+// Клавиатура для недельной аналитики (каждый 7-й день)
+export function getWeeklyAnalyticsKeyboard(weekNumber: number) {
+  return new InlineKeyboard()
+    .text('🧠 Обсудить аналитику', `ai_discuss_weekly_${weekNumber}`).row()
+    .text('📝 Записать в дневник', 'diary_add_evening').row()
+    .text('⏭ Пропустить', `skip_weekly_${weekNumber}`);
+}
+
 // Навигация по дневнику
 export function getDiaryNavigationKeyboard(hasNext: boolean) {
   const keyboard = new InlineKeyboard();

@@ -35,6 +35,9 @@ router.get('/:id', async (req, res) => {
       where: { id: parseInt(req.params.id) },
       include: {
         subscription: true,
+        weeklyAnalytics: {
+          orderBy: { createdAt: 'desc' }
+        },
         diaryEntries: {
           orderBy: {
             createdAt: 'desc'
