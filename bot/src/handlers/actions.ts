@@ -448,7 +448,7 @@ export function setupActionHandlers(bot: Bot<BotContext>) {
             try {
                 await ctx.reply(reply, { reply_markup: keyboard, parse_mode: 'Markdown' });
             } catch {
-                await ctx.reply(reply, { reply_markup: keyboard });
+            await ctx.reply(reply, { reply_markup: keyboard });
             }
 
         } catch (error) {

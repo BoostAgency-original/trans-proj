@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Users, CreditCard, BookOpen, TrendingUp } from 'lucide-react';
 import {
   getUsers,
@@ -19,7 +19,7 @@ interface Stats {
 }
 
 type Audience = 'all' | 'intro_not_completed' | 'paid_active' | 'no_paid_active';
-type ParseMode = null | 'HTML' | 'MarkdownV2';
+type ParseMode = null | 'MarkdownV2';
 
 interface BroadcastStats {
   all: number;
@@ -38,10 +38,13 @@ interface Broadcast {
   totalTargets: number;
   sentCount: number;
   failedCount: number;
+  error?: string | null;
   createdAt: string;
 }
 
 const Dashboard = () => {
+  const broadcastTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
   const [stats, setStats] = useState<Stats>({
     totalUsers: 0,
     activeSubscriptions: 0,
@@ -53,11 +56,74 @@ const Dashboard = () => {
   const [broadcastStats, setBroadcastStats] = useState<BroadcastStats | null>(null);
   const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
   const [broadcastAudience, setBroadcastAudience] = useState<Audience>('all');
-  const [broadcastParseMode, setBroadcastParseMode] = useState<ParseMode>('HTML');
+  const [broadcastParseMode, setBroadcastParseMode] = useState<ParseMode>('MarkdownV2');
   const [broadcastText, setBroadcastText] = useState('');
   const [broadcastSending, setBroadcastSending] = useState(false);
   const [broadcastError, setBroadcastError] = useState<string | null>(null);
   const [broadcastSuccess, setBroadcastSuccess] = useState<string | null>(null);
+
+  // MarkdownV2: оборачивает выделенный текст в теги
+  const applyWrap = (open: string, close: string, placeholder: string) => {
+    const el = broadcastTextareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    const before = broadcastText.slice(0, start);
+    const selected = broadcastText.slice(start, end);
+    const after = broadcastText.slice(end);
+
+    const inner = selected.length > 0 ? selected : placeholder;
+    const next = `${before}${open}${inner}${close}${after}`;
+    setBroadcastText(next);
+
+    // восстановим фокус и выделение
+    requestAnimationFrame(() => {
+      el.focus();
+      if (selected.length > 0) {
+        el.setSelectionRange(start, start + open.length + inner.length + close.length);
+      } else {
+        el.setSelectionRange(start + open.length, start + open.length + inner.length);
+      }
+    });
+  };
+
+  const applyLink = () => {
+    const url = window.prompt('Ссылка (URL):', 'https://');
+    if (!url) return;
+    const el = broadcastTextareaRef.current;
+    if (!el) return;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    const before = broadcastText.slice(0, start);
+    const selected = broadcastText.slice(start, end);
+    const after = broadcastText.slice(end);
+
+    const linkText = selected.length > 0 ? selected : 'ссылка';
+    // В MarkdownV2 ссылка: [текст](url)
+    const next = `${before}[${linkText}](${url})${after}`;
+    setBroadcastText(next);
+
+    requestAnimationFrame(() => {
+      el.focus();
+    });
+  };
+
+  const stripFormatting = () => {
+    // Убираем Markdown-форматирование
+    setBroadcastText((prev) =>
+      prev
+        .replace(/\*\*(.+?)\*\*/g, '$1') // **bold**
+        .replace(/\*(.+?)\*/g, '$1') // *bold*
+        .replace(/__(.+?)__/g, '$1') // __underline__
+        .replace(/_(.+?)_/g, '$1') // _italic_
+        .replace(/~~(.+?)~~/g, '$1') // ~~strike~~ (не telegram, но на всякий)
+        .replace(/~(.+?)~/g, '$1') // ~strike~
+        .replace(/\|\|(.+?)\|\|/g, '$1') // ||spoiler||
+        .replace(/`(.+?)`/g, '$1') // `code`
+        .replace(/```[\s\S]*?```/g, '') // ```code block```
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [text](url) -> text
+    );
+  };
 
   const audienceLabel: Record<Audience, string> = useMemo(
     () => ({
@@ -213,18 +279,59 @@ const Dashboard = () => {
                 value={broadcastParseMode === null ? 'PLAIN' : broadcastParseMode}
                 onChange={(e) => setBroadcastParseMode(e.target.value === 'PLAIN' ? null : (e.target.value as ParseMode))}
               >
-                <option value="HTML">HTML</option>
+                <option value="MarkdownV2">MarkdownV2</option>
                 <option value="PLAIN">Обычный текст</option>
               </select>
             </div>
 
             <div className="broadcast-row">
               <label>Текст</label>
+              {broadcastParseMode === 'MarkdownV2' ? (
+                <>
+                  <div className="broadcast-toolbar">
+                    <button type="button" className="broadcast-tool" title="Жирный *текст*" onClick={() => applyWrap('*', '*', 'жирный')}>
+                      <b>Ж</b>
+                    </button>
+                    <button type="button" className="broadcast-tool" title="Курсив _текст_" onClick={() => applyWrap('_', '_', 'курсив')}>
+                      <i>К</i>
+                    </button>
+                    <button type="button" className="broadcast-tool" title="Подчёркнутый __текст__" onClick={() => applyWrap('__', '__', 'подчёркнутый')}>
+                      <u>П</u>
+                    </button>
+                    <button type="button" className="broadcast-tool" title="Зачёркнутый ~текст~" onClick={() => applyWrap('~', '~', 'зачёркнутый')}>
+                      <s>З</s>
+                    </button>
+                    <button type="button" className="broadcast-tool" title="Код `текст`" onClick={() => applyWrap('`', '`', 'код')}>
+                      {'</>'}
+                    </button>
+                    <button type="button" className="broadcast-tool" title="Блок кода ```текст```" onClick={() => applyWrap('```\n', '\n```', 'код')}>
+                      pre
+                    </button>
+                    <button type="button" className="broadcast-tool" title="Спойлер ||текст||" onClick={() => applyWrap('||', '||', 'спойлер')}>
+                      👁
+                    </button>
+                    <button type="button" className="broadcast-tool" title="Ссылка [текст](url)" onClick={applyLink}>
+                      🔗
+                    </button>
+                    <button type="button" className="broadcast-tool danger" title="Убрать форматирование" onClick={stripFormatting}>
+                      ✕
+                    </button>
+                  </div>
+                  <div className="broadcast-hint">
+                    MarkdownV2: <code>*жирный*</code> <code>_курсив_</code> <code>__подчёркнутый__</code> <code>~зачёркнутый~</code> <code>`код`</code> <code>||спойлер||</code> <code>[текст](url)</code>
+                  </div>
+                </>
+              ) : null}
               <textarea
+                ref={broadcastTextareaRef}
                 value={broadcastText}
                 onChange={(e) => setBroadcastText(e.target.value)}
-                rows={8}
-                placeholder="Введите текст рассылки..."
+                rows={10}
+                placeholder={
+                  broadcastParseMode === 'MarkdownV2'
+                    ? 'Введите текст рассылки...\n\n*жирный* _курсив_ __подчёркнутый__ ~зачёркнутый~ `код` ||спойлер|| [ссылка](https://example.com)'
+                    : 'Введите текст рассылки...'
+                }
               />
             </div>
 
@@ -257,6 +364,11 @@ const Dashboard = () => {
                         Прогресс: {b.sentCount}/{b.totalTargets} • Ошибки: {b.failedCount}
                       </div>
                       <div className="broadcast-item-meta">Создана: {new Date(b.createdAt).toLocaleString()}</div>
+                      {b.error ? (
+                        <div className="broadcast-item-error" title={b.error}>
+                          {b.error}
+                        </div>
+                      ) : null}
                     </div>
                     {b.status === 'pending' || b.status === 'running' ? (
                       <button className="broadcast-cancel" onClick={() => onCancelBroadcast(b.id)} type="button">
@@ -280,4 +392,3 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
-

@@ -292,10 +292,10 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       try {
           await sendInvoiceWithReceipt(
             bot,
-            ctx.chat!.id,
+              ctx.chat!.id,
             providerToken,
-            plan.title,
-            plan.description,
+              plan.title,
+              plan.description,
             planId,
             plan.amount
           );
@@ -480,10 +480,10 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       console.error('Error sending gift invoice:', error);
       await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', {
         reply_markup: getBackToMenuKeyboard(),
-      });
-    }
+          });
+      }
   });
-
+  
   // Обработчик PreCheckoutQuery (обязательно для Telegram Payments)
   bot.on('pre_checkout_query', async (ctx) => {
       // Здесь можно добавить проверки (например, актуальность цены)

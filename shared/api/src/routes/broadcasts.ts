@@ -111,7 +111,7 @@ router.post('/', async (req, res) => {
     }
 
     const safeParseMode =
-      parseMode === 'HTML' || parseMode === 'MarkdownV2' || parseMode === null || typeof parseMode === 'undefined'
+      parseMode === 'MarkdownV2' || parseMode === null || typeof parseMode === 'undefined'
         ? parseMode
         : null;
 

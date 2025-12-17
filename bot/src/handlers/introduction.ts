@@ -142,7 +142,7 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
 
     await prisma.user.update({
       where: { id: ctx.dbUser!.id },
-      data: {
+      data: { 
         isIntroCompleted: true,
         introCompletedAt: hasPaid ? now : null,
         currentPrincipleDay: hasPaid ? 2 : 1,
@@ -157,7 +157,7 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
 
     if (hasPaid) {
       const principle = await prisma.transurfingPrinciple.findUnique({ where: { dayNumber: 1 } });
-      if (principle) {
+    if (principle) {
         const name = ctx.dbUser?.name || ctx.dbUser?.firstName || 'друг';
         const message =
           `${name}, поздравляю! Ты начал свой путь.\n\n` +
@@ -175,7 +175,7 @@ export function setupIntroductionHandlers(bot: Bot<BotContext>) {
       await ctx.reply(offerText, {
         parse_mode: 'HTML',
         reply_markup: getPostIntroOfferKeyboard(),
-      });
+        });
     }
     
     await ctx.answerCallbackQuery();

@@ -164,7 +164,7 @@ const UserDetail = () => {
 
       <div className="detail-card">
         <div className="card-header">
-          <h2>Подписка</h2>
+        <h2>Подписка</h2>
           <button className="grant-btn" onClick={() => setShowGrantModal(true)}>
             <Gift size={16} />
             Выдать подписку

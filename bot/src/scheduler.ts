@@ -13,6 +13,38 @@ const BROADCAST_INTERVAL_MS = Math.min(Math.max(parseInt(process.env.BROADCAST_I
 let isBroadcastProcessing = false;
 let isBroadcastFeatureUnavailable = false;
 
+function formatTelegramApiError(error: unknown): string {
+  const anyErr = error as any;
+  const code = anyErr?.error_code ?? anyErr?.error?.error_code;
+  const description = anyErr?.description ?? anyErr?.error?.description;
+  const message = anyErr?.message;
+  const main = description || message || String(anyErr);
+  if (typeof code === 'number') return `${code}: ${main}`;
+  return String(main);
+}
+
+function isParseEntitiesError(error: unknown): boolean {
+  const msg = formatTelegramApiError(error).toLowerCase();
+  return msg.includes("can't parse entities") || msg.includes('cant parse entities') || msg.includes('parse entities');
+}
+
+function markdownV2ToPlain(input: string): string {
+  // Фолбэк для MarkdownV2: убираем форматирование, оставляем текст.
+  return input
+    .replace(/```[\s\S]*?```/g, (m) => m.slice(3, -3).trim()) // ```code``` -> code
+    .replace(/`([^`]+)`/g, '$1') // `code` -> code
+    .replace(/\|\|([^|]+)\|\|/g, '$1') // ||spoiler|| -> spoiler
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // [text](url) -> text
+    .replace(/__([^_]+)__/g, '$1') // __underline__ -> underline
+    .replace(/~~([^~]+)~~/g, '$1') // ~~strike~~ -> strike (не Telegram, но на всякий)
+    .replace(/~([^~]+)~/g, '$1') // ~strike~ -> strike
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // **bold** -> bold (не Telegram, но на всякий)
+    .replace(/\*([^*]+)\*/g, '$1') // *bold* -> bold
+    .replace(/_([^_]+)_/g, '$1') // _italic_ -> italic
+    // Убираем экранирующие обратные слеши перед спецсимволами
+    .replace(/\\([_*\[\]()~`>#+\-=|{}.!])/g, '$1');
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -95,17 +127,36 @@ async function processBroadcasts(bot: Bot<BotContext>) {
 
     let sent = 0;
     let failed = 0;
+    const errorCounts = new Map<string, number>();
+    let loggedFailures = 0;
 
     for (const u of users) {
       try {
         const options: any = {};
-        if (current.parseMode === 'HTML' || current.parseMode === 'MarkdownV2') {
-          options.parse_mode = current.parseMode;
+        if (current.parseMode === 'MarkdownV2') {
+          options.parse_mode = 'MarkdownV2';
         }
-        await bot.api.sendMessage(u.telegramId.toString(), current.text, options);
+        try {
+          await bot.api.sendMessage(u.telegramId.toString(), current.text, options);
+        } catch (e) {
+          // Если сломана разметка (parse_mode), пробуем отправить как обычный текст
+          if (options.parse_mode && isParseEntitiesError(e)) {
+            const fallbackText = markdownV2ToPlain(current.text);
+            await bot.api.sendMessage(u.telegramId.toString(), fallbackText);
+          } else {
+            throw e;
+          }
+        }
         sent += 1;
       } catch (e) {
         failed += 1;
+        const err = formatTelegramApiError(e);
+        const key = err.length > 220 ? `${err.slice(0, 220)}…` : err;
+        errorCounts.set(key, (errorCounts.get(key) ?? 0) + 1);
+        if (loggedFailures < 3) {
+          loggedFailures += 1;
+          console.warn(`Broadcast #${current.id}: failed to send to userId=${u.id} telegramId=${u.telegramId.toString()}: ${key}`);
+        }
       }
       // небольшой троттлинг, чтобы не упереться в лимиты Telegram
       await sleep(40);
@@ -114,12 +165,23 @@ async function processBroadcasts(bot: Bot<BotContext>) {
     const lastId = users[users.length - 1]!.id;
 
     const shouldFinish = users.length < BROADCAST_BATCH_SIZE;
+
+    const errorSummary =
+      failed > 0
+        ? Array.from(errorCounts.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5)
+            .map(([k, v]) => `${k} (x${v})`)
+            .join('\n')
+        : null;
+
     await prisma.broadcast.update({
       where: { id: current.id },
       data: {
         sentCount: { increment: sent },
         failedCount: { increment: failed },
         lastProcessedUserId: lastId,
+        ...(errorSummary ? { error: errorSummary } : {}),
         ...(shouldFinish ? { status: 'completed', finishedAt: new Date() } : {}),
       },
     });
@@ -261,14 +323,14 @@ async function sendMorningMessages(bot: Bot<BotContext>) {
           const lastKey = getLocalDateKey(new Date(user.lastPrincipleSentAt), user.timezone);
           const nowKey = getLocalDateKey(now, user.timezone);
           if (lastKey === nowKey) {
-            continue;
-          }
+          continue;
+        }
         }
 
         // При напоминании отправляем тот же принцип (currentPrincipleDay - 1),
         // так как счётчик уже был инкрементирован после первой отправки
         let dayNumber = isReminderTime ? user.currentPrincipleDay - 1 : user.currentPrincipleDay;
-        
+
         // Защита от случая когда dayNumber = 0 (если напоминание сработало для дня 1)
         if (dayNumber < 1) dayNumber = 1;
         
