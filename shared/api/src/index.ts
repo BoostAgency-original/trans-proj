@@ -9,6 +9,7 @@ import { diaryRoutes } from './routes/diary';
 import { principleRoutes } from './routes/principles';
 import { authRoutes } from './routes/auth';
 import { broadcastRoutes } from './routes/broadcasts';
+import { tributeWebhookRoutes } from './routes/tribute-webhook';
 import { authMiddleware } from './middleware/authMiddleware';
 
 dotenv.config();
@@ -36,6 +37,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 app.use('/api/auth', authRoutes);
+app.use('/api/tribute/webhook', tributeWebhookRoutes); // Tribute webhook (public, no auth)
 
 // Protected Routes Middleware
 app.use('/api', authMiddleware);

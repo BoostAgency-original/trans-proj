@@ -15,6 +15,7 @@ export function getGiftPlansKeyboard() {
     .text('🎁 1 неделя (159₽)', 'gift_plan_sub_plan_week').row()
     .text('🎁 1 месяц (399₽)', 'gift_plan_sub_plan_month').row()
     .text('🎁 80 дней (999₽)', 'gift_plan_sub_plan_80days').row()
+    .url('🌟 Или через Tribute', TRIBUTE_LINK).row()
     .text('🚪 Выйти', 'menu_main');
 }
 
@@ -24,8 +25,37 @@ export function getSubscriptionKeyboard() {
     .text('1 неделя (159₽)', 'sub_plan_week').row()
     .text('1 месяц (399₽)', 'sub_plan_month').row()
     .text('80 дней (999₽)', 'sub_plan_80days').row()
+    .url('🌟 Или через Tribute', TRIBUTE_LINK).row()
     .text('🆘 Техподдержка', 'menu_support').row()
     .text('🚪 Выйти', 'menu_main');
+}
+
+// Ссылка на Tribute Mini App (настраивается в env)
+const TRIBUTE_LINK = process.env.TRIBUTE_LINK || 'https://t.me/tribute/app?startapp=sNhG';
+
+// Выбор способа оплаты после выбора тарифа
+export function getPaymentMethodKeyboard(planId: string) {
+  return new InlineKeyboard()
+    .text('💳 Картой (ЮКасса)', `confirm_buy_${planId}`).row()
+    .url('🌟 Через Tribute', TRIBUTE_LINK).row()
+    .text('« Назад', 'menu_subscription');
+}
+
+// Выбор способа оплаты для подарка
+export function getGiftPaymentMethodKeyboard(planId: string) {
+  return new InlineKeyboard()
+    .text('💳 Картой (ЮКасса)', `confirm_gift_${planId}`).row()
+    .url('🌟 Через Tribute', TRIBUTE_LINK).row()
+    .text('« Назад', 'menu_gift');
+}
+
+// Выбор способа оплаты для промо (до триала)
+export function getPromoPaymentMethodKeyboard(isMonth: boolean) {
+  const callbackData = isMonth ? 'promo_buy_month_299' : 'promo_buy_80days_799';
+  return new InlineKeyboard()
+    .text('💳 Картой (ЮКасса)', callbackData).row()
+    .url('🌟 Через Tribute', TRIBUTE_LINK).row()
+    .text('« Назад', 'back_to_promo_offer');
 }
 
 // Меню продолжения (после триала)
@@ -34,6 +64,7 @@ export function getContinuePathKeyboard() {
     .text('1 неделя (159₽)', 'sub_plan_week').row()
     .text('1 месяц (399₽)', 'sub_plan_month').row()
     .text('80 дней (999₽)', 'sub_plan_80days').row()
+    .url('🌟 Или через Tribute', TRIBUTE_LINK).row()
     .text('🆘 Техподдержка', 'menu_support').row()
     .text('🚪 Выйти', 'menu_main');
 }
@@ -78,8 +109,9 @@ export function getWeeklyAnalyticsKeyboard(weekNumber: number) {
 // Оффер после интро (до старта триала)
 export function getPostIntroOfferKeyboard() {
   return new InlineKeyboard()
-    .text('💎 1 месяц — 299₽', 'promo_buy_month_299').row()
-    .text('💎 80 дней — 799₽', 'promo_buy_80days_799').row()
+    .text('💎 1 месяц — 299₽ (картой)', 'promo_buy_month_299').row()
+    .text('💎 80 дней — 799₽ (картой)', 'promo_buy_80days_799').row()
+    .url('🌟 Оплатить через Tribute', TRIBUTE_LINK).row()
     .text('🚀 Начать бесплатный период', 'start_trial');
 }
 
@@ -135,6 +167,7 @@ export function getTimezoneKeyboard() {
 export function getTrialExpiredKeyboard() {
   return new InlineKeyboard()
     .text('🚀 Продолжить путь', 'menu_subscription').row()
+    .url('🌟 Оплатить через Tribute', TRIBUTE_LINK).row()
     .text('⏰ Напомнить позже', 'trial_remind_later');
 }
 

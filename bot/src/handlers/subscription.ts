@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard, getPromoPaymentMethodKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 
 const prisma = new PrismaClient();
@@ -200,24 +200,20 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       await ctx.answerCallbackQuery();
   });
 
-  // Шаг 1: Выбор тарифа → показываем подтверждение
+  // Шаг 1: Выбор тарифа → показываем выбор способа оплаты
   bot.callbackQuery(['sub_plan_week', 'sub_plan_month', 'sub_plan_80days'], async (ctx) => {
       const planId = ctx.callbackQuery.data as PlanId;
       const plan = PLANS[planId];
 
       const confirmText = 
           `Вы собираетесь купить подписку на использование сервиса на ${plan.duration}\n\n` +
-          `Стоимость: ${plan.amount / 100} ₽`;
-
-      const keyboard = new InlineKeyboard()
-          .text('💳 Купить', `confirm_buy_${planId}`)
-          .row()
-          .text('« Назад', 'menu_subscription');
+          `Стоимость: ${plan.amount / 100} ₽\n\n` +
+          `Выберите способ оплаты:`;
 
       try {
-          await ctx.editMessageText(confirmText, { reply_markup: keyboard });
+          await ctx.editMessageText(confirmText, { reply_markup: getPaymentMethodKeyboard(planId) });
       } catch (e) {
-          await ctx.reply(confirmText, { reply_markup: keyboard });
+          await ctx.reply(confirmText, { reply_markup: getPaymentMethodKeyboard(planId) });
       }
       await ctx.answerCallbackQuery();
   });
@@ -399,7 +395,7 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
     }
   });
   
-  // Подарок подписки: подтверждение и создание инвойса
+  // Подарок подписки: подтверждение и выбор способа оплаты
   bot.callbackQuery(/^gift_plan_(.+)$/, async (ctx) => {
     const planId = ctx.match[1] as PlanId;
     const plan = PLANS[planId];
@@ -412,17 +408,13 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       `🎁 Подарить подписку\n\n` +
       `Тариф: ${plan.duration}\n` +
       `Стоимость: ${plan.amount / 100} ₽\n\n` +
-      `После оплаты я пришлю «подарочную открытку» — её можно переслать другу или отправить в чат кнопкой.`;
-
-    const keyboard = new InlineKeyboard()
-      .text('💳 Купить подарок', `confirm_gift_${planId}`)
-      .row()
-      .text('« Назад', 'menu_gift');
+      `После оплаты я пришлю «подарочную открытку» — её можно переслать другу.\n\n` +
+      `Выберите способ оплаты:`;
 
     try {
-      await ctx.editMessageText(confirmText, { reply_markup: keyboard });
+      await ctx.editMessageText(confirmText, { reply_markup: getGiftPaymentMethodKeyboard(planId) });
     } catch (e) {
-      await ctx.reply(confirmText, { reply_markup: keyboard });
+      await ctx.reply(confirmText, { reply_markup: getGiftPaymentMethodKeyboard(planId) });
     }
     await ctx.answerCallbackQuery();
   });

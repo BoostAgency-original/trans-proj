@@ -24,6 +24,7 @@ services:
       DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/transurfing_db
       PORT: 3001
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      TRIBUTE_API_KEY: ${TRIBUTE_API_KEY}
     depends_on:
       - db
     ports:
@@ -42,6 +43,7 @@ services:
       PAYMENT_PROVIDER_TOKEN: ${PAYMENT_PROVIDER_TOKEN}
       TECH_SUPPORT_BOT: ${TECH_SUPPORT_BOT}
       ADMIN_ID: ${ADMIN_ID}
+      TRIBUTE_LINK: ${TRIBUTE_LINK}
     depends_on:
       - db
       - api
