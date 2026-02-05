@@ -5,28 +5,22 @@ import { PrismaClient } from '@prisma/client';
 const router = Router();
 const prisma = new PrismaClient();
 
-// Типы для вебхуков Tribute
-interface TributeUser {
-  id: number; // telegram_id
-  username?: string;
-  firstName?: string;
-  lastName?: string;
-}
-
-interface TributeSubscription {
-  id: number;
-  name: string;
-  period: number; // дней
-  price: number; // в копейках
-}
-
+// Реальная структура вебхука от Tribute
 interface TributeWebhookPayload {
-  id: number;
-  user: TributeUser;
+  subscription_name: string;
+  subscription_id: number;
+  period_id: number;
+  period: string; // "onetime", "week", "month", etc.
+  price: number;
+  amount: number;
+  currency: string;
+  user_id: number; // Tribute internal user ID
+  telegram_user_id: number; // Telegram ID пользователя!
+  web_app_link: string;
+  channel_id: number;
+  channel_name: string;
+  expires_at: string; // ISO date
   type: 'regular' | 'gift' | 'trial';
-  subscription: TributeSubscription;
-  startsAt?: string;
-  expiresAt?: string;
 }
 
 interface TributeWebhook {
@@ -34,6 +28,29 @@ interface TributeWebhook {
   created_at: string;
   sent_at: string;
   payload: TributeWebhookPayload;
+}
+
+// Маппинг периодов Tribute на дни
+function periodToDays(period: string, expiresAt?: string): number {
+  // Если есть expires_at — вычисляем дни до него
+  if (expiresAt) {
+    const expires = new Date(expiresAt);
+    const now = new Date();
+    const diffMs = expires.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    // Ограничиваем максимум 365 днями (если "onetime" = 100 лет)
+    return Math.min(Math.max(diffDays, 1), 365);
+  }
+  
+  // Fallback по названию периода
+  switch (period.toLowerCase()) {
+    case 'week': return 7;
+    case 'month': return 30;
+    case '3months': return 90;
+    case 'year': return 365;
+    case 'onetime': return 365; // Разовый = год
+    default: return 30; // По умолчанию месяц
+  }
 }
 
 // Проверка подписи HMAC-SHA256
@@ -134,21 +151,24 @@ router.post('/', async (req: Request, res: Response) => {
     switch (webhook.name) {
       case 'new_subscription':
       case 'subscription_renewed': {
-        const { user, subscription } = webhook.payload;
+        const { telegram_user_id, period, expires_at, subscription_name } = webhook.payload;
         
-        if (!user?.id || !subscription?.period) {
-          console.error('[Tribute Webhook] Missing user.id or subscription.period');
-          return res.status(400).json({ success: false, error: 'Invalid payload' });
+        if (!telegram_user_id) {
+          console.error('[Tribute Webhook] Missing telegram_user_id');
+          return res.status(400).json({ success: false, error: 'Missing telegram_user_id' });
         }
 
+        const days = periodToDays(period, expires_at);
+        
+        console.log(`[Tribute Webhook] Processing: telegram_user_id=${telegram_user_id}, period=${period}, days=${days}`);
+
         const result = await activateSubscription(
-          user.id,
-          subscription.period,
-          subscription.name
+          telegram_user_id,
+          days,
+          subscription_name
         );
 
         if (!result.success) {
-          // Возвращаем 200 чтобы Tribute не ретраил, но логируем ошибку
           console.error('[Tribute Webhook] Failed to activate:', result.error);
         }
 
