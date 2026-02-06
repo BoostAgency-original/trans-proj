@@ -18,8 +18,14 @@ export function getGiftPlansKeyboard() {
     .text('🎁 1 неделя (159₽)', 'gift_plan_sub_plan_week').row()
     .text('🎁 1 месяц (399₽)', 'gift_plan_sub_plan_month').row()
     .text('🎁 80 дней (999₽)', 'gift_plan_sub_plan_80days').row()
-    .url('🌟 Или через Tribute', TRIBUTE_LINK).row()
     .text('🚪 Выйти', 'menu_main');
+}
+
+// Ссылка на Tribute для перехода после создания подарка
+export function getTributeGiftLinkKeyboard() {
+  return new InlineKeyboard()
+    .url('🌟 Перейти к оплате в Tribute', TRIBUTE_LINK).row()
+    .text('« Отмена', 'menu_gift');
 }
 
 // Меню подписки (Inline)
@@ -45,7 +51,7 @@ export function getPaymentMethodKeyboard(planId: string) {
 export function getGiftPaymentMethodKeyboard(planId: string) {
   return new InlineKeyboard()
     .text('💳 Картой (ЮКасса)', `confirm_gift_${planId}`).row()
-    .url('🌟 Через Tribute', TRIBUTE_LINK).row()
+    .text('🌟 Через Tribute', `tribute_gift_${planId}`).row()
     .text('« Назад', 'menu_gift');
 }
 

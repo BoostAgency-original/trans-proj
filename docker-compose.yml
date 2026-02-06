@@ -25,6 +25,8 @@ services:
       PORT: 3001
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       TRIBUTE_API_KEY: ${TRIBUTE_API_KEY}
+      BOT_TOKEN: ${BOT_TOKEN}
+      BOT_USERNAME: ${BOT_USERNAME}
     depends_on:
       - db
     ports:

@@ -5,6 +5,49 @@ import { PrismaClient } from '@prisma/client';
 const router = Router();
 const prisma = new PrismaClient();
 
+// Отправка сообщения через Telegram Bot API
+async function sendTelegramMessage(chatId: number, text: string, replyMarkup?: any) {
+  const botToken = process.env.BOT_TOKEN;
+  if (!botToken) {
+    console.error('[Tribute Webhook] BOT_TOKEN not configured');
+    return false;
+  }
+
+  try {
+    const body: any = {
+      chat_id: chatId,
+      text,
+      parse_mode: 'HTML',
+    };
+    if (replyMarkup) {
+      body.reply_markup = JSON.stringify(replyMarkup);
+    }
+
+    const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Tribute Webhook] Telegram API error:', errorText);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('[Tribute Webhook] Error sending Telegram message:', error);
+    return false;
+  }
+}
+
+// Генерация ссылки на подарок
+function buildGiftLink(token: string): { link?: string; startCmd: string } {
+  const botUsername = process.env.BOT_USERNAME;
+  const link = botUsername ? `https://t.me/${botUsername}?start=gift_${token}` : undefined;
+  return { link, startCmd: `/start gift_${token}` };
+}
+
 // Реальная структура вебхука от Tribute
 interface TributeWebhookPayload {
   subscription_name: string;
@@ -162,13 +205,75 @@ router.post('/', async (req: Request, res: Response) => {
         
         console.log(`[Tribute Webhook] Processing: telegram_user_id=${telegram_user_id}, period=${period}, days=${days}`);
 
+        // Находим пользователя
+        const user = await prisma.user.findUnique({
+          where: { telegramId: BigInt(telegram_user_id) }
+        });
+
+        if (!user) {
+          console.error(`[Tribute Webhook] User not found: telegramId=${telegram_user_id}`);
+          return res.json({ success: true }); // 200 чтобы не ретраил
+        }
+
+        // Проверяем есть ли pending_tribute подарок от этого пользователя
+        const pendingGift = await prisma.giftSubscription.findFirst({
+          where: {
+            createdByUserId: user.id,
+            status: 'pending_tribute'
+          },
+          orderBy: { createdAt: 'desc' }
+        });
+
+        if (pendingGift) {
+          // Это оплата подарка — отправляем ссылку
+          console.log(`[Tribute Webhook] Found pending gift: ${pendingGift.token}`);
+
+          await prisma.giftSubscription.update({
+            where: { token: pendingGift.token },
+            data: { status: 'paid', paidAt: new Date() }
+          });
+
+          const { link, startCmd } = buildGiftLink(pendingGift.token);
+          const giftDuration = pendingGift.days === 7 ? '1 неделю' : 
+                              pendingGift.days === 30 ? '1 месяц' : 
+                              `${pendingGift.days} дней`;
+
+          const message = 
+            `🎁 <b>Подарок оплачен!</b>\n\n` +
+            `Подписка на <b>${giftDuration}</b> готова к отправке.\n\n` +
+            (link 
+              ? `<b>Ссылка для друга:</b>\n<a href="${link}">${link}</a>\n\n`
+              : `<b>Команда для друга:</b>\n<code>${startCmd}</code>\n\n`) +
+            `Перешлите это сообщение другу или скопируйте ссылку.`;
+
+          const keyboard = link ? {
+            inline_keyboard: [
+              [{ text: '📨 Поделиться', url: `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent('🎁 Дарю тебе подписку!')}` }]
+            ]
+          } : undefined;
+
+          await sendTelegramMessage(telegram_user_id, message, keyboard);
+          console.log(`[Tribute Webhook] Gift link sent to user ${telegram_user_id}`);
+
+          return res.json({ success: true });
+        }
+
+        // Обычная подписка — активируем
         const result = await activateSubscription(
           telegram_user_id,
           days,
           subscription_name
         );
 
-        if (!result.success) {
+        if (result.success) {
+          // Отправляем подтверждение пользователю
+          const message = 
+            `✅ <b>Оплата через Tribute прошла успешно!</b>\n\n` +
+            `Ваша подписка активирована до ${result.expiresAt?.toLocaleDateString('ru-RU')}.\n` +
+            `Спасибо, что вы с нами!`;
+          
+          await sendTelegramMessage(telegram_user_id, message);
+        } else {
           console.error('[Tribute Webhook] Failed to activate:', result.error);
         }
 

@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard, getPromoPaymentMethodKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard, getPromoPaymentMethodKeyboard, getTributeGiftLinkKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 
 const prisma = new PrismaClient();
@@ -474,6 +474,39 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
         reply_markup: getBackToMenuKeyboard(),
           });
       }
+  });
+
+  // Подарок через Tribute: создаём GiftSubscription и показываем ссылку
+  bot.callbackQuery(/^tribute_gift_(.+)$/, async (ctx) => {
+    const planId = ctx.match[1] as PlanId;
+    const plan = PLANS[planId];
+    if (!plan) {
+      await ctx.answerCallbackQuery('Неизвестный тариф');
+      return;
+    }
+
+    // Создаём подарок со статусом pending_tribute
+    const gift = await prisma.giftSubscription.create({
+      data: {
+        status: 'pending_tribute',
+        planId,
+        days: plan.days,
+        amount: plan.amount,
+        currency: 'RUB',
+        createdByUserId: ctx.dbUser!.id,
+      },
+    });
+
+    await ctx.answerCallbackQuery();
+
+    await ctx.reply(
+      `🎁 Подарок создан!\n\n` +
+      `Тариф: ${plan.duration}\n\n` +
+      `Перейдите в Tribute для оплаты. После оплаты я автоматически пришлю вам ссылку-подарок.`,
+      { reply_markup: getTributeGiftLinkKeyboard() }
+    );
+
+    console.log(`[Gift Tribute] Created gift ${gift.token} for user ${ctx.dbUser!.id}, plan ${planId}`);
   });
   
   // Обработчик PreCheckoutQuery (обязательно для Telegram Payments)
