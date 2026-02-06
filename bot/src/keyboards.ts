@@ -1,5 +1,8 @@
 import { InlineKeyboard } from 'grammy';
 
+// Ссылка на Tribute Mini App (настраивается в env)
+const TRIBUTE_LINK = process.env.TRIBUTE_LINK || 'https://t.me/tribute/app?startapp=sNhG';
+
 // Главное меню (Inline)
 export function getMainMenuKeyboard() {
   return new InlineKeyboard()
@@ -29,9 +32,6 @@ export function getSubscriptionKeyboard() {
     .text('🆘 Техподдержка', 'menu_support').row()
     .text('🚪 Выйти', 'menu_main');
 }
-
-// Ссылка на Tribute Mini App (настраивается в env)
-const TRIBUTE_LINK = process.env.TRIBUTE_LINK || 'https://t.me/tribute/app?startapp=sNhG';
 
 // Выбор способа оплаты после выбора тарифа
 export function getPaymentMethodKeyboard(planId: string) {
