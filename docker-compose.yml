@@ -24,10 +24,9 @@ services:
       DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/transurfing_db
       PORT: 3001
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      TRIBUTE_API_KEY: ${TRIBUTE_API_KEY}
-      TRIBUTE_DEFAULT_DAYS: ${TRIBUTE_DEFAULT_DAYS:-}
+      CRYPTO_PAY_API_TOKEN: ${CRYPTO_PAY_API_TOKEN}
       BOT_TOKEN: ${BOT_TOKEN}
-      BOT_USERNAME: ${BOT_USERNAME}
+      BOT_USERNAME: ${BOT_USERNAME:-}
     depends_on:
       - db
     ports:
@@ -41,12 +40,14 @@ services:
     restart: always
     environment:
       BOT_TOKEN: ${BOT_TOKEN}
+      BOT_USERNAME: ${BOT_USERNAME:-}
       DATABASE_URL: postgres://postgres:${DB_PASSWORD}@db:5432/transurfing_db
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
       PAYMENT_PROVIDER_TOKEN: ${PAYMENT_PROVIDER_TOKEN}
       TECH_SUPPORT_BOT: ${TECH_SUPPORT_BOT}
       ADMIN_ID: ${ADMIN_ID}
-      TRIBUTE_LINK: ${TRIBUTE_LINK}
+      CRYPTO_PAY_API_URL: ${CRYPTO_PAY_API_URL:-https://testnet-pay.crypt.bot/api}
+      CRYPTO_PAY_API_TOKEN: ${CRYPTO_PAY_API_TOKEN}
     depends_on:
       - db
       - api
@@ -64,4 +65,3 @@ services:
 
 volumes:
   postgres_data:
-

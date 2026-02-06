@@ -1,8 +1,9 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard, getPromoPaymentMethodKeyboard, getTributeGiftLinkKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard, getPromoPaymentMethodKeyboard, getPostIntroOfferKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
+import { createCryptoInvoice } from '../services/crypto-pay';
 
 const prisma = new PrismaClient();
 
@@ -28,8 +29,6 @@ function buildGiftShareReplyMarkup(opts: {
   link?: string;
   token: string;
 }) {
-  // Надёжный "шаринг" без inline-mode: Telegram открывает окно отправки в чат с предзаполненным текстом
-  // https://core.telegram.org/widgets/share
   const shareUrl =
     `https://t.me/share/url?` +
     `url=${encodeURIComponent(opts.link ?? '')}` +
@@ -121,6 +120,8 @@ const PLANS = {
 
 type PlanId = keyof typeof PLANS;
 
+// --- Helpers ---
+
 async function sendInvoiceWithReceipt(
   bot: Bot<BotContext>,
   chatId: number,
@@ -180,6 +181,90 @@ async function sendFirstPrinciple(ctx: BotContext) {
   await ctx.reply(message, { reply_markup: getMorningKeyboard(), parse_mode: 'HTML' });
 }
 
+// Общая логика активации подписки (PAYMENTS_DISABLED режим)
+async function activateTestSubscription(ctx: BotContext, plan: (typeof PLANS)[PlanId]) {
+  const user = ctx.dbUser!;
+  const now = new Date();
+  const currentExpiresAt =
+    user.subscription?.expiresAt && user.subscription.expiresAt > now
+      ? user.subscription.expiresAt
+      : now;
+  const newExpiresAt = new Date(currentExpiresAt);
+  newExpiresAt.setDate(newExpiresAt.getDate() + plan.days);
+
+  await prisma.subscription.upsert({
+    where: { userId: user.id },
+    update: { isActive: true, expiresAt: newExpiresAt, updatedAt: new Date() },
+    create: {
+      userId: user.id,
+      isActive: true,
+      activatedAt: new Date(),
+      expiresAt: newExpiresAt,
+      trialDaysUsed: user.subscription?.trialDaysUsed || 0,
+    },
+  });
+
+  await ctx.reply(
+    `🧪 Тестовый режим: подписка выдана без оплаты.\n\n` +
+    `Ваша подписка продлена до ${newExpiresAt.toLocaleDateString('ru-RU')}.`,
+    { reply_markup: getMainMenuKeyboard() }
+  );
+
+  if (user.isIntroCompleted && !user.introCompletedAt) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { introCompletedAt: now, currentPrincipleDay: 2, lastPrincipleSentAt: now } as any,
+    });
+    await sendFirstPrinciple(ctx);
+  }
+}
+
+// Создание и отправка крипто-инвойса
+async function sendCryptoInvoice(ctx: BotContext, opts: {
+  type: 'subscription' | 'gift';
+  planId: PlanId;
+  amountRub: number;
+  description: string;
+  giftToken?: string;
+}) {
+  const user = ctx.dbUser!;
+  const plan = PLANS[opts.planId];
+
+  const payload = JSON.stringify({
+    type: opts.type,
+    userId: user.id,
+    telegramId: Number(user.telegramId),
+    planId: opts.planId,
+    days: plan.days,
+    giftToken: opts.giftToken,
+  });
+
+  try {
+    const invoice = await createCryptoInvoice({
+      amountRub: opts.amountRub,
+      description: opts.description,
+      payload,
+      botUsername: process.env.BOT_USERNAME,
+    });
+
+    const keyboard = new InlineKeyboard()
+      .url('💰 Оплатить криптой', invoice.payUrl).row()
+      .text('« Назад', 'menu_subscription');
+
+    await ctx.reply(
+      `Инвойс создан!\n\n` +
+      `Нажмите кнопку ниже для оплаты:`,
+      { reply_markup: keyboard }
+    );
+  } catch (error) {
+    console.error('[CryptoPay] Error creating invoice:', error);
+    await ctx.reply('❌ Ошибка при создании крипто-платежа. Попробуйте позже.', {
+      reply_markup: getBackToMenuKeyboard(),
+    });
+  }
+}
+
+
 export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
   // Показать /start-команду для подарка (если BOT_USERNAME не задан)
   bot.callbackQuery(/^gift_cmd_(.+)$/, async (ctx) => {
@@ -188,10 +273,9 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
     await ctx.reply(`Команда для друга:\n<code>/start gift_${escapeHtml(token)}</code>`, { parse_mode: 'HTML' });
   });
   
-  // Кнопка "Продолжить путь" (из сообщения о конце триала) или "Подписка" из меню
+  // Кнопка "Продолжить путь" или "Подписка" из меню
   bot.callbackQuery(['menu_subscription', 'sub_activate'], async (ctx) => {
       const text = 'Выберите подходящий тариф:';
-      
       try {
           await ctx.editMessageText(text, { reply_markup: getSubscriptionKeyboard() });
       } catch (e) {
@@ -206,7 +290,7 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       const plan = PLANS[planId];
 
       const confirmText = 
-          `Вы собираетесь купить подписку на использование сервиса на ${plan.duration}\n\n` +
+          `Подписка на ${plan.duration}\n` +
           `Стоимость: ${plan.amount / 100} ₽\n\n` +
           `Выберите способ оплаты:`;
 
@@ -218,104 +302,90 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       await ctx.answerCallbackQuery();
   });
 
-  // Шаг 2: Подтверждение покупки → отправляем инвойс ЮКассы
+  // Шаг 2а: Оплата картой (ЮКасса)
   bot.callbackQuery(/^confirm_buy_(.+)$/, async (ctx) => {
       const planId = ctx.match[1] as PlanId;
       const plan = PLANS[planId];
 
-      // Локальный тестовый режим: без реальной оплаты
       if (PAYMENTS_DISABLED) {
           await ctx.answerCallbackQuery();
-          const user = ctx.dbUser!;
-          const now = new Date();
-          const currentExpiresAt =
-            user.subscription?.expiresAt && user.subscription.expiresAt > now
-              ? user.subscription.expiresAt
-              : now;
-          const newExpiresAt = new Date(currentExpiresAt);
-          newExpiresAt.setDate(newExpiresAt.getDate() + plan.days);
-
-          await prisma.subscription.upsert({
-              where: { userId: user.id },
-              update: {
-                  isActive: true,
-                  expiresAt: newExpiresAt,
-                  updatedAt: new Date()
-              },
-              create: {
-                  userId: user.id,
-                  isActive: true,
-                  activatedAt: new Date(),
-                  expiresAt: newExpiresAt,
-                  trialDaysUsed: user.subscription?.trialDaysUsed || 0
-              }
-          });
-
-          await ctx.reply(
-              `🧪 Тестовый режим: подписка выдана без оплаты.\n\n` +
-              `Ваша подписка продлена до ${newExpiresAt.toLocaleDateString('ru-RU')}.`,
-              { reply_markup: getMainMenuKeyboard() }
-          );
-
-          // Если практика ещё не стартовала — стартуем и отправим 1-й принцип
-          if (user.isIntroCompleted && !user.introCompletedAt) {
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                introCompletedAt: now,
-                currentPrincipleDay: 2,
-                lastPrincipleSentAt: now,
-              } as any,
-            });
-            await sendFirstPrinciple(ctx);
-          }
+          await activateTestSubscription(ctx, plan);
           return;
       }
 
       const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
-      
       if (!providerToken) {
           await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
-          console.error('PAYMENT_PROVIDER_TOKEN is missing');
           return;
       }
 
       await ctx.answerCallbackQuery();
-      
-      console.log(`Sending invoice: ${plan.title} for ${plan.amount} kopecks`);
 
-      // Отправляем инвойс через Telegram Payments API (ЮКасса)
       try {
-          await sendInvoiceWithReceipt(
-            bot,
-              ctx.chat!.id,
-            providerToken,
-              plan.title,
-              plan.description,
-            planId,
-            plan.amount
-          );
+          await sendInvoiceWithReceipt(bot, ctx.chat!.id, providerToken, plan.title, plan.description, planId, plan.amount);
       } catch (error) {
           console.error('Error sending invoice:', error);
-          await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', {
-              reply_markup: getBackToMenuKeyboard()
-          });
+          await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', { reply_markup: getBackToMenuKeyboard() });
       }
   });
 
-  // Промо-оплата до старта триала (скидка только тут)
-  bot.callbackQuery(['promo_buy_month_299', 'promo_buy_80days_799'], async (ctx) => {
-    const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
-    if (!providerToken) {
-      if (!PAYMENTS_DISABLED) {
-        await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
-        console.error('PAYMENT_PROVIDER_TOKEN is missing');
-        return;
+  // Шаг 2б: Оплата криптой (Crypto Pay)
+  bot.callbackQuery(/^crypto_buy_(.+)$/, async (ctx) => {
+      const planId = ctx.match[1] as PlanId;
+      const plan = PLANS[planId];
+
+      if (PAYMENTS_DISABLED) {
+          await ctx.answerCallbackQuery();
+          await activateTestSubscription(ctx, plan);
+          return;
       }
+
+      await ctx.answerCallbackQuery();
+      await sendCryptoInvoice(ctx, {
+        type: 'subscription',
+        planId,
+        amountRub: plan.amount / 100,
+        description: plan.title,
+      });
+  });
+
+  // Промо: шаг 1 — выбор промо-плана → показываем выбор способа оплаты
+  bot.callbackQuery(['promo_plan_month_299', 'promo_plan_80days_799'], async (ctx) => {
+    const user = ctx.dbUser!;
+    if (user.introCompletedAt) {
+      await ctx.answerCallbackQuery('Акция доступна только до старта пробного периода');
+      return;
     }
 
+    const isMonth = ctx.callbackQuery.data === 'promo_plan_month_299';
+    const planId: PlanId = isMonth ? 'sub_plan_month' : 'sub_plan_80days';
+    const plan = PLANS[planId];
+    const promoPrice = isMonth ? 299 : 799;
+    const cardCallback = isMonth ? 'promo_buy_month_299' : 'promo_buy_80days_799';
+
+    const text = `${plan.title} (акция)\nСтоимость: ${promoPrice} ₽\n\nВыберите способ оплаты:`;
+
+    try {
+      await ctx.editMessageText(text, { reply_markup: getPromoPaymentMethodKeyboard(cardCallback) });
+    } catch (e) {
+      await ctx.reply(text, { reply_markup: getPromoPaymentMethodKeyboard(cardCallback) });
+    }
+    await ctx.answerCallbackQuery();
+  });
+
+  // Промо: кнопка «Назад» к промо-офферу
+  bot.callbackQuery('back_to_promo_offer', async (ctx) => {
+    try {
+      await ctx.editMessageText('Специальное предложение:', { reply_markup: getPostIntroOfferKeyboard() });
+    } catch (e) {
+      await ctx.reply('Специальное предложение:', { reply_markup: getPostIntroOfferKeyboard() });
+    }
+    await ctx.answerCallbackQuery();
+  });
+
+  // Промо: шаг 2а — оплата картой
+  bot.callbackQuery(['promo_buy_month_299', 'promo_buy_80days_799'], async (ctx) => {
     const user = ctx.dbUser!;
-    // Скидка доступна только до старта практики (introCompletedAt == null)
     if (user.introCompletedAt) {
       await ctx.answerCallbackQuery('Акция доступна только до старта пробного периода');
       return;
@@ -325,77 +395,58 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
     const planId: PlanId = isMonth ? 'sub_plan_month' : 'sub_plan_80days';
     const plan = PLANS[planId];
     const promoAmount = isMonth ? 29900 : 79900;
-    const title = isMonth ? `${plan.title} (акция)` : `${plan.title} (акция)`;
-    const description = isMonth
-      ? 'Скидка доступна до старта пробного периода'
-      : 'Скидка доступна до старта пробного периода';
+    const title = `${plan.title} (акция)`;
+
+    if (PAYMENTS_DISABLED) {
+      await ctx.answerCallbackQuery();
+      await activateTestSubscription(ctx, plan);
+      return;
+    }
+
+    const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
+    if (!providerToken) {
+      await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
+      return;
+    }
 
     await ctx.answerCallbackQuery();
     try {
-      // Тестовый режим: выдаём подписку без оплаты
-      if (PAYMENTS_DISABLED) {
-        const now = new Date();
-        const currentExpiresAt =
-          user.subscription?.expiresAt && user.subscription.expiresAt > now
-            ? user.subscription.expiresAt
-            : now;
-        const newExpiresAt = new Date(currentExpiresAt);
-        newExpiresAt.setDate(newExpiresAt.getDate() + plan.days);
-
-        await prisma.subscription.upsert({
-          where: { userId: user.id },
-          update: {
-            isActive: true,
-            expiresAt: newExpiresAt,
-            updatedAt: new Date(),
-          },
-          create: {
-            userId: user.id,
-            isActive: true,
-            activatedAt: new Date(),
-            expiresAt: newExpiresAt,
-            trialDaysUsed: user.subscription?.trialDaysUsed || 0,
-          },
-        });
-
-        await ctx.reply(
-          `🧪 Тестовый режим: подписка выдана без оплаты.\n\n` +
-            `Ваша подписка продлена до ${newExpiresAt.toLocaleDateString('ru-RU')}.`,
-          { reply_markup: getMainMenuKeyboard() }
-        );
-
-        if (user.isIntroCompleted && !user.introCompletedAt) {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: {
-              introCompletedAt: now,
-              currentPrincipleDay: 2,
-              lastPrincipleSentAt: now,
-            } as any,
-          });
-          await sendFirstPrinciple(ctx);
-        }
-        return;
-      }
-
-      await sendInvoiceWithReceipt(
-        bot,
-        ctx.chat!.id,
-        providerToken!,
-        title,
-        description,
-        planId, // payload оставляем обычным, скидка действует только в этом сценарии
-        promoAmount
-      );
+      await sendInvoiceWithReceipt(bot, ctx.chat!.id, providerToken, title, 'Скидка до старта пробного периода', planId, promoAmount);
     } catch (error) {
       console.error('Error sending promo invoice:', error);
-      await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', {
-        reply_markup: getBackToMenuKeyboard(),
-      });
+      await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', { reply_markup: getBackToMenuKeyboard() });
     }
   });
+
+  // Промо: шаг 2б — оплата криптой
+  bot.callbackQuery(['crypto_promo_buy_month_299', 'crypto_promo_buy_80days_799'], async (ctx) => {
+    const user = ctx.dbUser!;
+    if (user.introCompletedAt) {
+      await ctx.answerCallbackQuery('Акция доступна только до старта пробного периода');
+      return;
+    }
+
+    const isMonth = ctx.callbackQuery.data === 'crypto_promo_buy_month_299';
+    const planId: PlanId = isMonth ? 'sub_plan_month' : 'sub_plan_80days';
+    const plan = PLANS[planId];
+    const promoPrice = isMonth ? 299 : 799;
+
+    if (PAYMENTS_DISABLED) {
+      await ctx.answerCallbackQuery();
+      await activateTestSubscription(ctx, plan);
+      return;
+    }
+
+    await ctx.answerCallbackQuery();
+    await sendCryptoInvoice(ctx, {
+      type: 'subscription',
+      planId,
+      amountRub: promoPrice,
+      description: `${plan.title} (акция)`,
+    });
+  });
   
-  // Подарок подписки: подтверждение и выбор способа оплаты
+  // Подарок: шаг 1 — выбор тарифа → выбор способа оплаты
   bot.callbackQuery(/^gift_plan_(.+)$/, async (ctx) => {
     const planId = ctx.match[1] as PlanId;
     const plan = PLANS[planId];
@@ -408,7 +459,6 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       `🎁 Подарить подписку\n\n` +
       `Тариф: ${plan.duration}\n` +
       `Стоимость: ${plan.amount / 100} ₽\n\n` +
-      `После оплаты я пришлю «подарочную открытку» — её можно переслать другу.\n\n` +
       `Выберите способ оплаты:`;
 
     try {
@@ -419,104 +469,74 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
     await ctx.answerCallbackQuery();
   });
 
+  // Подарок: шаг 2а — оплата картой
   bot.callbackQuery(/^confirm_gift_(.+)$/, async (ctx) => {
     const planId = ctx.match[1] as PlanId;
     const plan = PLANS[planId];
-    if (!plan) {
-      await ctx.answerCallbackQuery('Неизвестный тариф');
-      return;
-    }
+    if (!plan) { await ctx.answerCallbackQuery('Неизвестный тариф'); return; }
 
     const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
     if (!providerToken && !PAYMENTS_DISABLED) {
       await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
-      console.error('PAYMENT_PROVIDER_TOKEN is missing');
       return;
     }
 
     const gift = await prisma.giftSubscription.create({
-      data: {
-        status: 'created',
-        planId,
-        days: plan.days,
-        amount: plan.amount,
-        currency: 'RUB',
-        createdByUserId: ctx.dbUser!.id,
-      },
+      data: { status: 'created', planId, days: plan.days, amount: plan.amount, currency: 'RUB', createdByUserId: ctx.dbUser!.id },
     });
 
     await ctx.answerCallbackQuery();
+
+    if (PAYMENTS_DISABLED) {
+      await prisma.giftSubscription.update({ where: { token: gift.token }, data: { status: 'paid', paidAt: new Date() } });
+      await sendGiftCardToBuyer(ctx, { token: gift.token, plan, isTest: true });
+      return;
+    }
 
     try {
-      // Тестовый режим: считаем подарок сразу оплаченным и отдаём ссылку
-      if (PAYMENTS_DISABLED) {
-        await prisma.giftSubscription.update({
-          where: { token: gift.token },
-          data: { status: 'paid', paidAt: new Date() },
-        });
-
-        await sendGiftCardToBuyer(ctx, { token: gift.token, plan, isTest: true });
-        return;
-      }
-
-      await sendInvoiceWithReceipt(
-        bot,
-        ctx.chat!.id,
-        providerToken!,
-        `Подарок: ${plan.title}`,
-        `Подарочная подписка на ${plan.duration}`,
-        `gift:${gift.token}`,
-        plan.amount
-      );
+      await sendInvoiceWithReceipt(bot, ctx.chat!.id, providerToken!, `Подарок: ${plan.title}`, `Подарочная подписка на ${plan.duration}`, `gift:${gift.token}`, plan.amount);
     } catch (error) {
       console.error('Error sending gift invoice:', error);
-      await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', {
-        reply_markup: getBackToMenuKeyboard(),
-          });
-      }
+      await ctx.reply('❌ Ошибка при создании платежа.', { reply_markup: getBackToMenuKeyboard() });
+    }
   });
 
-  // Подарок через Tribute: создаём GiftSubscription и показываем ссылку
-  bot.callbackQuery(/^tribute_gift_(.+)$/, async (ctx) => {
+  // Подарок: шаг 2б — оплата криптой
+  bot.callbackQuery(/^crypto_gift_(.+)$/, async (ctx) => {
     const planId = ctx.match[1] as PlanId;
     const plan = PLANS[planId];
-    if (!plan) {
-      await ctx.answerCallbackQuery('Неизвестный тариф');
+    if (!plan) { await ctx.answerCallbackQuery('Неизвестный тариф'); return; }
+
+    if (PAYMENTS_DISABLED) {
+      await ctx.answerCallbackQuery();
+      const gift = await prisma.giftSubscription.create({
+        data: { status: 'paid', planId, days: plan.days, amount: plan.amount, currency: 'RUB', createdByUserId: ctx.dbUser!.id, paidAt: new Date() },
+      });
+      await sendGiftCardToBuyer(ctx, { token: gift.token, plan, isTest: true });
       return;
     }
 
-    // Создаём подарок со статусом pending_tribute
+    // Создаём подарок
     const gift = await prisma.giftSubscription.create({
-      data: {
-        status: 'pending_tribute',
-        planId,
-        days: plan.days,
-        amount: plan.amount,
-        currency: 'RUB',
-        createdByUserId: ctx.dbUser!.id,
-      },
+      data: { status: 'created', planId, days: plan.days, amount: plan.amount, currency: 'RUB', createdByUserId: ctx.dbUser!.id },
     });
 
     await ctx.answerCallbackQuery();
-
-    await ctx.reply(
-      `🎁 Подарок создан!\n\n` +
-      `Тариф: ${plan.duration}\n\n` +
-      `Перейдите в Tribute для оплаты. После оплаты я автоматически пришлю вам ссылку-подарок.`,
-      { reply_markup: getTributeGiftLinkKeyboard() }
-    );
-
-    console.log(`[Gift Tribute] Created gift ${gift.token} for user ${ctx.dbUser!.id}, plan ${planId}`);
+    await sendCryptoInvoice(ctx, {
+      type: 'gift',
+      planId,
+      amountRub: plan.amount / 100,
+      description: `Подарок: ${plan.title}`,
+      giftToken: gift.token,
+    });
   });
   
-  // Обработчик PreCheckoutQuery (обязательно для Telegram Payments)
+  // Обработчик PreCheckoutQuery (для Telegram Payments / ЮКасса)
   bot.on('pre_checkout_query', async (ctx) => {
-      // Здесь можно добавить проверки (например, актуальность цены)
-      // Для простоты просто подтверждаем
       await ctx.answerPreCheckoutQuery(true);
   });
 
-  // Обработчик успешного платежа
+  // Обработчик успешного платежа (ЮКасса)
   bot.on('message:successful_payment', async (ctx) => {
       const payment = ctx.message.successful_payment;
       const payload = payment.invoice_payload;
@@ -525,111 +545,60 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       if (payload.startsWith('gift:')) {
         const token = payload.slice('gift:'.length);
         const gift = await prisma.giftSubscription.findUnique({ where: { token } });
-        if (!gift) {
-          console.error('Gift not found for token:', token);
-          return;
-        }
+        if (!gift || gift.status !== 'created') return;
 
-        if (gift.status !== 'created') {
-          // уже обработан
-          return;
-        }
-
-        await prisma.giftSubscription.update({
-          where: { token },
-          data: { status: 'paid', paidAt: new Date() },
-        });
+        await prisma.giftSubscription.update({ where: { token }, data: { status: 'paid', paidAt: new Date() } });
 
         const plan = PLANS[gift.planId as PlanId];
-        if (!plan) {
-          console.error('Unknown gift planId in db:', gift.planId);
-          return;
-        }
+        if (!plan) return;
         await sendGiftCardToBuyer(ctx, { token, plan, isTest: false });
         return;
       }
 
       const planId = payload as PlanId;
       const plan = PLANS[planId];
-      
-      if (!plan) {
-          console.error('Unknown plan in payment:', planId);
-          return;
-      }
+      if (!plan) { console.error('Unknown plan in payment:', planId); return; }
 
       const user = ctx.dbUser!;
       const currentExpiresAt = user.subscription?.expiresAt && user.subscription.expiresAt > new Date() 
-          ? user.subscription.expiresAt 
-          : new Date();
-
+          ? user.subscription.expiresAt : new Date();
       const newExpiresAt = new Date(currentExpiresAt);
       newExpiresAt.setDate(newExpiresAt.getDate() + plan.days);
 
       await prisma.subscription.upsert({
           where: { userId: user.id },
-          update: {
-              isActive: true,
-              expiresAt: newExpiresAt,
-              updatedAt: new Date()
-          },
-          create: {
-              userId: user.id,
-              isActive: true,
-              activatedAt: new Date(),
-              expiresAt: newExpiresAt,
-              trialDaysUsed: user.subscription?.trialDaysUsed || 0
-          }
+          update: { isActive: true, expiresAt: newExpiresAt, updatedAt: new Date() },
+          create: { userId: user.id, isActive: true, activatedAt: new Date(), expiresAt: newExpiresAt, trialDaysUsed: user.subscription?.trialDaysUsed || 0 },
       });
 
       await ctx.reply(
-          `✅ Оплата прошла успешно!\n\n` +
-          `Ваша подписка продлена до ${newExpiresAt.toLocaleDateString('ru-RU')}.\n` +
-          `Спасибо, что вы с нами!`,
+          `✅ Оплата прошла успешно!\n\nВаша подписка продлена до ${newExpiresAt.toLocaleDateString('ru-RU')}.\nСпасибо, что вы с нами!`,
           { reply_markup: getMainMenuKeyboard() }
       );
 
-      // Если пользователь купил подписку ДО старта триала — запускаем практику и отправляем 1-й принцип
       if (user.isIntroCompleted && !user.introCompletedAt) {
         const now = new Date();
         await prisma.user.update({
           where: { id: user.id },
-          data: {
-            introCompletedAt: now,
-            currentPrincipleDay: 2,
-            lastPrincipleSentAt: now,
-          },
+          data: { introCompletedAt: now, currentPrincipleDay: 2, lastPrincipleSentAt: now },
         });
         await sendFirstPrinciple(ctx);
       }
   });
 
-  // Обработка "Напомнить позже" (из триала) - напоминание через 2 дня
+  // "Напомнить позже" (из триала)
   bot.callbackQuery('trial_remind_later', async (ctx) => {
-      const nextTime = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000); // +2 дня
-      await prisma.user.update({
-          where: { id: ctx.dbUser!.id },
-          data: { subscriptionReminderAt: nextTime }
-      });
-
+      const nextTime = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+      await prisma.user.update({ where: { id: ctx.dbUser!.id }, data: { subscriptionReminderAt: nextTime } });
       const text = await getMessage('trial_remind_later', 'Иногда решение приходит не сразу. Напомню тебе через 2 дня.');
-      
-      try {
-          await ctx.editMessageText(text, { reply_markup: getRemindLaterTrialKeyboard() });
-      } catch (e) {
-          await ctx.reply(text, { reply_markup: getRemindLaterTrialKeyboard() });
-      }
+      try { await ctx.editMessageText(text, { reply_markup: getRemindLaterTrialKeyboard() }); } catch (e) { await ctx.reply(text, { reply_markup: getRemindLaterTrialKeyboard() }); }
       await ctx.answerCallbackQuery();
   });
 
-  // Обработка "Нет, спасибо"
+  // "Нет, спасибо"
   bot.callbackQuery('trial_no_thanks', async (ctx) => {
       const text = await getMessage('trial_no_thanks', 'Я уважаю твой выбор...');
-      
-      try {
-          await ctx.editMessageText(text, { reply_markup: undefined });
-      } catch (e) {
-          await ctx.reply(text);
-      }
+      try { await ctx.editMessageText(text, { reply_markup: undefined }); } catch (e) { await ctx.reply(text); }
       await ctx.answerCallbackQuery();
   });
 }
