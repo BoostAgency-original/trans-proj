@@ -74,7 +74,15 @@ interface TributeWebhook {
 }
 
 // Маппинг периодов Tribute на дни
+// TRIBUTE_DEFAULT_DAYS — для тестовой версии где все тарифы = неделя
+const TRIBUTE_DEFAULT_DAYS = process.env.TRIBUTE_DEFAULT_DAYS ? parseInt(process.env.TRIBUTE_DEFAULT_DAYS) : null;
+
 function periodToDays(period: string, expiresAt?: string): number {
+  // Если задан TRIBUTE_DEFAULT_DAYS (тестовый режим) — всегда возвращаем его
+  if (TRIBUTE_DEFAULT_DAYS) {
+    return TRIBUTE_DEFAULT_DAYS;
+  }
+
   // Если есть expires_at — вычисляем дни до него
   if (expiresAt) {
     const expires = new Date(expiresAt);
