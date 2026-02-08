@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard, getPostIntroOfferKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 import { createCryptoInvoice } from '../services/crypto-pay';
 
@@ -289,15 +289,20 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       const planId = ctx.callbackQuery.data as PlanId;
       const plan = PLANS[planId];
 
+      // Определяем откуда пришёл — если практика не стартовала, значит с промо-оффера
+      const user = ctx.dbUser!;
+      const fromPromo = user.isIntroCompleted && !user.introCompletedAt;
+      const backTo = fromPromo ? 'back_to_promo_offer' : 'menu_subscription';
+
       const confirmText = 
           `Подписка на ${plan.duration}\n` +
           `Стоимость: ${plan.amount / 100} ₽\n\n` +
           `Выберите способ оплаты:`;
 
       try {
-          await ctx.editMessageText(confirmText, { reply_markup: getPaymentMethodKeyboard(planId) });
+          await ctx.editMessageText(confirmText, { reply_markup: getPaymentMethodKeyboard(planId, backTo) });
       } catch (e) {
-          await ctx.reply(confirmText, { reply_markup: getPaymentMethodKeyboard(planId) });
+          await ctx.reply(confirmText, { reply_markup: getPaymentMethodKeyboard(planId, backTo) });
       }
       await ctx.answerCallbackQuery();
   });
@@ -347,6 +352,16 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
         amountRub: plan.amount / 100,
         description: plan.title,
       });
+  });
+
+  // Кнопка «Назад» к промо-офферу (из выбора способа оплаты)
+  bot.callbackQuery('back_to_promo_offer', async (ctx) => {
+    try {
+      await ctx.editMessageText('Выберите тариф или начните бесплатный период:', { reply_markup: getPostIntroOfferKeyboard() });
+    } catch (e) {
+      await ctx.reply('Выберите тариф или начните бесплатный период:', { reply_markup: getPostIntroOfferKeyboard() });
+    }
+    await ctx.answerCallbackQuery();
   });
 
   // Подарок: шаг 1 — выбор тарифа → выбор способа оплаты

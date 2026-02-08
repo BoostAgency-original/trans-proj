@@ -29,11 +29,11 @@ export function getSubscriptionKeyboard() {
 }
 
 // Выбор способа оплаты после выбора тарифа
-export function getPaymentMethodKeyboard(planId: string) {
+export function getPaymentMethodKeyboard(planId: string, backTo: string = 'menu_subscription') {
   return new InlineKeyboard()
     .text('💳 Картой', `confirm_buy_${planId}`).row()
     .text('₿ Криптой', `crypto_buy_${planId}`).row()
-    .text('« Назад', 'menu_subscription');
+    .text('« Назад', backTo);
 }
 
 // Выбор способа оплаты для подарка
