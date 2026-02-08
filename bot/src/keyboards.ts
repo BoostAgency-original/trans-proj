@@ -91,10 +91,9 @@ export function getWeeklyAnalyticsKeyboard(weekNumber: number) {
     .text('⏭ Пропустить', `skip_weekly_${weekNumber}`);
 }
 
-// Оффер после интро (до старта триала) — обычные тарифы + пробная неделя
+// Оффер после интро (до старта триала) — оплата вперёд или пробная неделя
 export function getPostIntroOfferKeyboard() {
   return new InlineKeyboard()
-    .text('💎 1 неделя (159₽)', 'sub_plan_week').row()
     .text('💎 1 месяц (399₽)', 'sub_plan_month').row()
     .text('💎 80 дней (999₽)', 'sub_plan_80days').row()
     .text('🚀 Начать бесплатный период', 'start_trial');
