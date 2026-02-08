@@ -2,7 +2,7 @@
 // Testnet: https://testnet-pay.crypt.bot/
 // Mainnet: https://pay.crypt.bot/
 
-const CRYPTO_PAY_API_URL = process.env.CRYPTO_PAY_API_URL || 'https://testnet-pay.crypt.bot/api';
+const CRYPTO_PAY_API_URL = process.env.CRYPTO_PAY_API_URL || 'https://pay.crypt.bot/api';
 const CRYPTO_PAY_TOKEN = process.env.CRYPTO_PAY_API_TOKEN || '';
 
 interface CryptoPayInvoice {

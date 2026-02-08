@@ -46,7 +46,7 @@ services:
       PAYMENT_PROVIDER_TOKEN: ${PAYMENT_PROVIDER_TOKEN}
       TECH_SUPPORT_BOT: ${TECH_SUPPORT_BOT}
       ADMIN_ID: ${ADMIN_ID}
-      CRYPTO_PAY_API_URL: ${CRYPTO_PAY_API_URL:-https://testnet-pay.crypt.bot/api}
+      CRYPTO_PAY_API_URL: ${CRYPTO_PAY_API_URL:-https://pay.crypt.bot/api}
       CRYPTO_PAY_API_TOKEN: ${CRYPTO_PAY_API_TOKEN}
     depends_on:
       - db
