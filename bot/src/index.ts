@@ -97,13 +97,13 @@ bot.start({
     if (process.env.PAYMENT_PROVIDER_TOKEN) {
         console.log('💳 Payment token loaded:', process.env.PAYMENT_PROVIDER_TOKEN.substring(0, 10) + '...');
     } else {
-        console.warn('⚠️ PAYMENT_PROVIDER_TOKEN is missing in .env (Not needed if using Tribute)');
+        console.warn('⚠️ PAYMENT_PROVIDER_TOKEN is missing in .env');
     }
 
-    if (process.env.TRIBUTE_API_KEY) {
-        console.log('💳 Tribute API Key loaded:', process.env.TRIBUTE_API_KEY.substring(0, 5) + '...');
+    if (process.env.CRYPTO_PAY_API_TOKEN) {
+        console.log('₿ Crypto Pay token loaded:', process.env.CRYPTO_PAY_API_TOKEN.substring(0, 8) + '...');
     } else {
-        console.error('❌ TRIBUTE_API_KEY is missing in .env!');
+        console.warn('⚠️ CRYPTO_PAY_API_TOKEN is missing in .env');
     }
     
     // Устанавливаем команды для кнопки Menu
