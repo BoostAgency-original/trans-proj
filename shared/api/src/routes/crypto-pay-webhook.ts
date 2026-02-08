@@ -161,7 +161,7 @@ router.post('/', async (req: Request, res: Response) => {
       });
 
       // Генерируем ссылку на подарок
-      const botUsername = process.env.BOT_USERNAME;
+      const botUsername = process.env.BOT_USERNAME?.replace('@', '');
       const link = botUsername
         ? `https://t.me/${botUsername}?start=gift_${data.giftToken}`
         : null;

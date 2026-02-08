@@ -70,7 +70,7 @@ export async function createCryptoInvoice(opts: {
     description: opts.description,
     payload: opts.payload,
     paid_btn_name: 'callback',
-    paid_btn_url: opts.botUsername ? `https://t.me/${opts.botUsername}` : 'https://t.me',
+    paid_btn_url: opts.botUsername ? `https://t.me/${opts.botUsername.replace('@', '')}` : 'https://t.me',
   };
 
   const invoice = await cryptoPayRequest<CryptoPayInvoice>('createInvoice', params);

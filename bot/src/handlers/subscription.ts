@@ -19,7 +19,7 @@ function escapeHtml(input: string): string {
 }
 
 function buildGiftLink(token: string): { link?: string; startCmd: string } {
-  const botUsername = process.env.BOT_USERNAME;
+  const botUsername = process.env.BOT_USERNAME?.replace('@', '');
   const link = botUsername ? `https://t.me/${botUsername}?start=gift_${token}` : undefined;
   return { link, startCmd: `/start gift_${token}` };
 }
