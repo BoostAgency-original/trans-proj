@@ -91,20 +91,13 @@ export function getWeeklyAnalyticsKeyboard(weekNumber: number) {
     .text('⏭ Пропустить', `skip_weekly_${weekNumber}`);
 }
 
-// Оффер после интро (до старта триала)
+// Оффер после интро (до старта триала) — обычные тарифы + пробная неделя
 export function getPostIntroOfferKeyboard() {
   return new InlineKeyboard()
-    .text('💎 1 месяц — 299₽', 'promo_plan_month_299').row()
-    .text('💎 80 дней — 799₽', 'promo_plan_80days_799').row()
+    .text('💎 1 неделя (159₽)', 'sub_plan_week').row()
+    .text('💎 1 месяц (399₽)', 'sub_plan_month').row()
+    .text('💎 80 дней (999₽)', 'sub_plan_80days').row()
     .text('🚀 Начать бесплатный период', 'start_trial');
-}
-
-// Выбор оплаты для промо (после выбора плана)
-export function getPromoPaymentMethodKeyboard(callbackCard: string) {
-  return new InlineKeyboard()
-    .text('💳 Картой', callbackCard).row()
-    .text('₿ Криптой', `crypto_${callbackCard}`).row()
-    .text('« Назад', 'back_to_promo_offer');
 }
 
 // Навигация по дневнику

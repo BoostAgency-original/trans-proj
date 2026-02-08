@@ -1,7 +1,7 @@
 import { Bot, InlineKeyboard } from 'grammy';
 import { PrismaClient } from '@prisma/client';
 import type { BotContext } from '../types';
-import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard, getPromoPaymentMethodKeyboard, getPostIntroOfferKeyboard } from '../keyboards';
+import { getMainMenuKeyboard, getSubscriptionKeyboard, getRemindLaterTrialKeyboard, getBackToMenuKeyboard, getMorningKeyboard, getPaymentMethodKeyboard, getGiftPaymentMethodKeyboard } from '../keyboards';
 import { getMessage } from '../services/messages';
 import { createCryptoInvoice } from '../services/crypto-pay';
 
@@ -349,103 +349,6 @@ export function setupSubscriptionHandlers(bot: Bot<BotContext>) {
       });
   });
 
-  // Промо: шаг 1 — выбор промо-плана → показываем выбор способа оплаты
-  bot.callbackQuery(['promo_plan_month_299', 'promo_plan_80days_799'], async (ctx) => {
-    const user = ctx.dbUser!;
-    if (user.introCompletedAt) {
-      await ctx.answerCallbackQuery('Акция доступна только до старта пробного периода');
-      return;
-    }
-
-    const isMonth = ctx.callbackQuery.data === 'promo_plan_month_299';
-    const planId: PlanId = isMonth ? 'sub_plan_month' : 'sub_plan_80days';
-    const plan = PLANS[planId];
-    const promoPrice = isMonth ? 299 : 799;
-    const cardCallback = isMonth ? 'promo_buy_month_299' : 'promo_buy_80days_799';
-
-    const text = `${plan.title} (акция)\nСтоимость: ${promoPrice} ₽\n\nВыберите способ оплаты:`;
-
-    try {
-      await ctx.editMessageText(text, { reply_markup: getPromoPaymentMethodKeyboard(cardCallback) });
-    } catch (e) {
-      await ctx.reply(text, { reply_markup: getPromoPaymentMethodKeyboard(cardCallback) });
-    }
-    await ctx.answerCallbackQuery();
-  });
-
-  // Промо: кнопка «Назад» к промо-офферу
-  bot.callbackQuery('back_to_promo_offer', async (ctx) => {
-    try {
-      await ctx.editMessageText('Специальное предложение:', { reply_markup: getPostIntroOfferKeyboard() });
-    } catch (e) {
-      await ctx.reply('Специальное предложение:', { reply_markup: getPostIntroOfferKeyboard() });
-    }
-    await ctx.answerCallbackQuery();
-  });
-
-  // Промо: шаг 2а — оплата картой
-  bot.callbackQuery(['promo_buy_month_299', 'promo_buy_80days_799'], async (ctx) => {
-    const user = ctx.dbUser!;
-    if (user.introCompletedAt) {
-      await ctx.answerCallbackQuery('Акция доступна только до старта пробного периода');
-      return;
-    }
-
-    const isMonth = ctx.callbackQuery.data === 'promo_buy_month_299';
-    const planId: PlanId = isMonth ? 'sub_plan_month' : 'sub_plan_80days';
-    const plan = PLANS[planId];
-    const promoAmount = isMonth ? 29900 : 79900;
-    const title = `${plan.title} (акция)`;
-
-    if (PAYMENTS_DISABLED) {
-      await ctx.answerCallbackQuery();
-      await activateTestSubscription(ctx, plan);
-      return;
-    }
-
-    const providerToken = process.env.PAYMENT_PROVIDER_TOKEN;
-    if (!providerToken) {
-      await ctx.answerCallbackQuery('⚠️ Платежная система временно недоступна');
-      return;
-    }
-
-    await ctx.answerCallbackQuery();
-    try {
-      await sendInvoiceWithReceipt(bot, ctx.chat!.id, providerToken, title, 'Скидка до старта пробного периода', planId, promoAmount);
-    } catch (error) {
-      console.error('Error sending promo invoice:', error);
-      await ctx.reply('❌ Ошибка при создании платежа. Попробуйте позже.', { reply_markup: getBackToMenuKeyboard() });
-    }
-  });
-
-  // Промо: шаг 2б — оплата криптой
-  bot.callbackQuery(['crypto_promo_buy_month_299', 'crypto_promo_buy_80days_799'], async (ctx) => {
-    const user = ctx.dbUser!;
-    if (user.introCompletedAt) {
-      await ctx.answerCallbackQuery('Акция доступна только до старта пробного периода');
-      return;
-    }
-
-    const isMonth = ctx.callbackQuery.data === 'crypto_promo_buy_month_299';
-    const planId: PlanId = isMonth ? 'sub_plan_month' : 'sub_plan_80days';
-    const plan = PLANS[planId];
-    const promoPrice = isMonth ? 299 : 799;
-
-    if (PAYMENTS_DISABLED) {
-      await ctx.answerCallbackQuery();
-      await activateTestSubscription(ctx, plan);
-      return;
-    }
-
-    await ctx.answerCallbackQuery();
-    await sendCryptoInvoice(ctx, {
-      type: 'subscription',
-      planId,
-      amountRub: promoPrice,
-      description: `${plan.title} (акция)`,
-    });
-  });
-  
   // Подарок: шаг 1 — выбор тарифа → выбор способа оплаты
   bot.callbackQuery(/^gift_plan_(.+)$/, async (ctx) => {
     const planId = ctx.match[1] as PlanId;
